@@ -17,4 +17,4 @@ dependencies = [
 ]
 
 [tool.vercel]
-entrypoint = "dashboard.server:app"
+entrypoint = "main:app"

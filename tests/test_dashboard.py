@@ -1,10 +1,10 @@
 import pytest
 from fastapi.testclient import TestClient
-from dashboard.server import app
+import dashboard.server
 
 @pytest.fixture
 def client():
-    return TestClient(app)
+    return TestClient(dashboard.server.app)
 
 def test_dashboard_index_serves_html(client):
     res = client.get("/")

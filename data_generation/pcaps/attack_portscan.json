@@ -1,0 +1,10 @@
+{
+  "pcap_file": "attack_portscan.pcap",
+  "threat_class": "e_recon_port_scan",
+  "scanner_ip": "192.168.1.77",
+  "vertical_target": "192.168.1.5",
+  "vertical_ports_probed": 150,
+  "horizontal_targets_count": 50,
+  "expected_scan_rate": ">50 pps",
+  "expected_half_open_ratio": "1.0"
+}

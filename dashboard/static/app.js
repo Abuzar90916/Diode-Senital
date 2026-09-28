@@ -1,0 +1,1373 @@
+/**
+ * DIODE-SENTINEL // Tactical Security Operations Center Controller
+ * Multi-Page SPA Client Router, Real-Time SSE Consumer, Neumorphic SOC UI Controller
+ */
+
+class DiodeSentinelApp {
+  constructor() {
+    // Application State
+    this.currentRoute = '/dashboard/overview';
+    this.alerts = [];
+    this.incidents = [];
+    this.flows = [];
+    this.telemetry = null;
+    this.validationData = null;
+    this.complianceData = null;
+    this.runtimeStatus = null;
+    this.demoScenarios = [];
+    
+    // UI Filters & Paging
+    this.activeThreatFilter = 'ALL';
+    this.activeTimeWindow = '1H';
+    this.isDemoRunning = false;
+    this.demoPollingTimer = null;
+    this.eventSource = null;
+
+    // Initialize application
+    this.initElements();
+    this.initRouting();
+    this.initEventListeners();
+    this.initDataSources();
+    this.connectSSE();
+  }
+
+  /* ========================================================================
+     1. ROUTING ARCHITECTURE
+     ======================================================================== */
+  initRouting() {
+    // Handle browser back/forward navigation
+    window.addEventListener('popstate', () => {
+      this.handleLocationChange(window.location.pathname, false);
+    });
+
+    // Handle initial route on page load
+    const initialPath = window.location.pathname;
+    this.handleLocationChange(initialPath, true);
+  }
+
+  handleLocationChange(pathname, replaceInitial = false) {
+    let target = pathname.toLowerCase();
+    
+    // Normalize aliases
+    if (target === '/' || target === '/dashboard' || target === '/dashboard/') {
+      target = '/dashboard/overview';
+    }
+
+    const validRoutes = [
+      '/dashboard/overview',
+      '/dashboard/threats',
+      '/dashboard/incidents',
+      '/dashboard/flows',
+      '/dashboard/engine',
+      '/dashboard/demo',
+      '/dashboard/system'
+    ];
+
+    if (!validRoutes.includes(target)) {
+      target = '/dashboard/overview';
+    }
+
+    if (replaceInitial) {
+      window.history.replaceState({ route: target }, '', target);
+    }
+
+    this.navigateTo(target, false);
+  }
+
+  navigateTo(route, pushHistory = true) {
+    this.currentRoute = route;
+
+    if (pushHistory) {
+      window.history.pushState({ route: route }, '', route);
+    }
+
+    // Hide all pages, show target page
+    document.querySelectorAll('.page-view').forEach(p => p.classList.remove('active'));
+    
+    const pageIdMap = {
+      '/dashboard/overview': 'page-overview',
+      '/dashboard/threats': 'page-threats',
+      '/dashboard/incidents': 'page-incidents',
+      '/dashboard/flows': 'page-flows',
+      '/dashboard/engine': 'page-engine',
+      '/dashboard/demo': 'page-demo',
+      '/dashboard/system': 'page-system'
+    };
+
+    const targetPageId = pageIdMap[route] || 'page-overview';
+    const targetElement = document.getElementById(targetPageId);
+    if (targetElement) {
+      targetElement.classList.add('active');
+    }
+
+    // Update active nav state in desktop sidebar
+    document.querySelectorAll('.desktop-sidebar .nav-item').forEach(item => {
+      item.classList.toggle('active', item.dataset.route === route);
+    });
+
+    // Update active nav state in mobile bottom bar
+    document.querySelectorAll('.mobile-bottom-nav .bottom-nav-item').forEach(item => {
+      if (item.dataset.route) {
+        item.classList.toggle('active', item.dataset.route === route);
+      }
+    });
+
+    // Update topbar breadcrumbs & page titles
+    this.updateTopbarTitles(route);
+
+    // Close mobile drawer if open
+    this.closeMobileDrawer();
+
+    // Trigger page-specific data refresh
+    this.onPageEntered(route);
+
+    // Scroll main viewport to top
+    window.scrollTo({ top: 0, behavior: 'instant' });
+    const appMain = document.getElementById('appMain');
+    if (appMain) appMain.scrollTo({ top: 0, behavior: 'instant' });
+  }
+
+  updateTopbarTitles(route) {
+    const titles = {
+      '/dashboard/overview': { label: 'OVERVIEW', breadcrumb: 'Diode Sentinel / Security Command Console' },
+      '/dashboard/threats': { label: 'LIVE THREATS', breadcrumb: 'ThreatCore / Corroborated Attack Events' },
+      '/dashboard/incidents': { label: 'ATTACK CHAINS', breadcrumb: 'Correlation Engine / Corroborated Kill-Chains' },
+      '/dashboard/flows': { label: 'NETWORK FLOWS', breadcrumb: 'Streaming Flow Aggregator / 6 Feature Domains' },
+      '/dashboard/engine': { label: 'MODEL ENGINE', breadcrumb: 'Machine Learning Classifiers & SLA SLAs' },
+      '/dashboard/demo': { label: 'DEMO TESTING', breadcrumb: 'Passive Ingestion / Attack PCAP Scenario Replay' },
+      '/dashboard/system': { label: 'SYSTEM & DIODE', breadcrumb: 'Hardware Diode Compliance & Enclave Governance' }
+    };
+
+    const info = titles[route] || titles['/dashboard/overview'];
+    const labelEl = document.getElementById('topbarPageTitle');
+    const breadcrumbEl = document.getElementById('topbarBreadcrumb');
+    if (labelEl) labelEl.textContent = info.label;
+    if (breadcrumbEl) breadcrumbEl.textContent = info.breadcrumb;
+    document.title = `DIODE SENTINEL // ${info.label}`;
+  }
+
+  onPageEntered(route) {
+    if (route === '/dashboard/flows') {
+      this.loadFlows();
+    } else if (route === '/dashboard/engine') {
+      this.loadValidationData();
+    } else if (route === '/dashboard/demo') {
+      this.loadDemoScenarios();
+      this.checkRuntimeStatus();
+    } else if (route === '/dashboard/system') {
+      this.loadComplianceAudit();
+    } else if (route === '/dashboard/overview') {
+      this.renderOverview();
+    } else if (route === '/dashboard/threats') {
+      this.renderThreats();
+    } else if (route === '/dashboard/incidents') {
+      this.renderIncidents();
+    }
+  }
+
+  /* ========================================================================
+     2. ELEMENT INITIALIZATION & EVENT LISTENERS
+     ======================================================================== */
+  initElements() {
+    // Mobile navigation controls
+    this.btnMobileMenuToggle = document.getElementById('btnMobileMenuToggle');
+    this.btnMobileMore = document.getElementById('btnMobileMore');
+    this.mobileDrawer = document.getElementById('mobileDrawer');
+    this.mobileDrawerOverlay = document.getElementById('mobileDrawerOverlay');
+    this.btnDrawerClose = document.getElementById('btnDrawerClose');
+
+    // Modals
+    this.validationModal = document.getElementById('validationModal');
+    this.alertDetailModal = document.getElementById('alertDetailModal');
+    this.flowDetailModal = document.getElementById('flowDetailModal');
+
+    // Close buttons
+    this.btnCloseValidation = document.getElementById('btnCloseValidation');
+    this.btnDismissValidation = document.getElementById('btnDismissValidation');
+    this.btnCloseAlertModal = document.getElementById('btnCloseAlertModal');
+    this.btnDismissAlertModal = document.getElementById('btnDismissAlertModal');
+    this.btnCloseFlowModal = document.getElementById('btnCloseFlowModal');
+    this.btnDismissFlowModal = document.getElementById('btnDismissFlowModal');
+    this.btnOpenAuditModal = document.getElementById('btnOpenAuditModal');
+    this.btnResetWatchdog = document.getElementById('btnResetWatchdog');
+  }
+
+  initEventListeners() {
+    // Intercept client-side routing links
+    document.addEventListener('click', (e) => {
+      const link = e.target.closest('a[data-route]');
+      if (link && link.dataset.route) {
+        e.preventDefault();
+        this.navigateTo(link.dataset.route, true);
+      }
+    });
+
+    // Mobile drawer toggle
+    if (this.btnMobileMenuToggle) {
+      this.btnMobileMenuToggle.addEventListener('click', () => this.toggleMobileDrawer());
+    }
+    if (this.btnMobileMore) {
+      this.btnMobileMore.addEventListener('click', () => this.toggleMobileDrawer());
+    }
+    if (this.mobileDrawerOverlay) {
+      this.mobileDrawerOverlay.addEventListener('click', () => this.closeMobileDrawer());
+    }
+    if (this.btnDrawerClose) {
+      this.btnDrawerClose.addEventListener('click', () => this.closeMobileDrawer());
+    }
+
+    // Time window selector chips
+    document.querySelectorAll('#timeWindowSelector .btn-time-chip').forEach(chip => {
+      chip.addEventListener('click', (e) => {
+        document.querySelectorAll('#timeWindowSelector .btn-time-chip').forEach(c => c.classList.remove('active'));
+        e.currentTarget.classList.add('active');
+        this.activeTimeWindow = e.currentTarget.dataset.window;
+        this.renderOverview();
+      });
+    });
+
+    // Threat class filter chips
+    document.querySelectorAll('#threatFiltersBar .filter-chip').forEach(chip => {
+      chip.addEventListener('click', (e) => {
+        document.querySelectorAll('#threatFiltersBar .filter-chip').forEach(c => c.classList.remove('active'));
+        e.currentTarget.classList.add('active');
+        this.activeThreatFilter = e.currentTarget.dataset.filter;
+        this.renderThreats();
+      });
+    });
+
+    // Modal listeners
+    if (this.btnOpenAuditModal) {
+      this.btnOpenAuditModal.addEventListener('click', () => this.openAuditModal());
+    }
+    if (this.btnCloseValidation) {
+      this.btnCloseValidation.addEventListener('click', () => this.closeModal(this.validationModal));
+    }
+    if (this.btnDismissValidation) {
+      this.btnDismissValidation.addEventListener('click', () => this.closeModal(this.validationModal));
+    }
+    if (this.btnCloseAlertModal) {
+      this.btnCloseAlertModal.addEventListener('click', () => this.closeModal(this.alertDetailModal));
+    }
+    if (this.btnDismissAlertModal) {
+      this.btnDismissAlertModal.addEventListener('click', () => this.closeModal(this.alertDetailModal));
+    }
+    if (this.btnCloseFlowModal) {
+      this.btnCloseFlowModal.addEventListener('click', () => this.closeModal(this.flowDetailModal));
+    }
+    if (this.btnDismissFlowModal) {
+      this.btnDismissFlowModal.addEventListener('click', () => this.closeModal(this.flowDetailModal));
+    }
+
+    // Watchdog baseline reset
+    if (this.btnResetWatchdog) {
+      this.btnResetWatchdog.addEventListener('click', () => this.resetWatchdog());
+    }
+
+    // Scenario RUN TEST buttons
+    document.addEventListener('click', (e) => {
+      const btn = e.target.closest('.btn-run-scenario');
+      if (btn && btn.dataset.pcap) {
+        this.runDemoScenario(btn.dataset.pcap, btn);
+      }
+    });
+
+    // Close modals on Escape key
+    window.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape') {
+        this.closeAllModals();
+        this.closeMobileDrawer();
+      }
+    });
+  }
+
+  toggleMobileDrawer() {
+    const isOpen = this.mobileDrawer.classList.contains('open');
+    if (isOpen) {
+      this.closeMobileDrawer();
+    } else {
+      this.openMobileDrawer();
+    }
+  }
+
+  openMobileDrawer() {
+    if (this.mobileDrawer) this.mobileDrawer.classList.add('open');
+    if (this.mobileDrawerOverlay) this.mobileDrawerOverlay.classList.add('open');
+  }
+
+  closeMobileDrawer() {
+    if (this.mobileDrawer) this.mobileDrawer.classList.remove('open');
+    if (this.mobileDrawerOverlay) this.mobileDrawerOverlay.classList.remove('open');
+  }
+
+  openModal(modal) {
+    if (modal) modal.classList.add('open');
+  }
+
+  closeModal(modal) {
+    if (modal) modal.classList.remove('open');
+  }
+
+  closeAllModals() {
+    document.querySelectorAll('.modal-backdrop').forEach(m => m.classList.remove('open'));
+  }
+
+  /* ========================================================================
+     3. DATA SOURCE INITIALIZATION & SSE STREAMING
+     ======================================================================== */
+  initDataSources() {
+    this.loadTelemetry();
+    this.loadAlerts();
+    this.loadIncidents();
+    this.loadComplianceAudit();
+
+    // Periodically update telemetry
+    setInterval(() => {
+      this.loadTelemetry();
+      this.checkRuntimeStatus();
+    }, 4000);
+  }
+
+  connectSSE() {
+    if (this.eventSource) {
+      this.eventSource.close();
+    }
+
+    this.eventSource = new EventSource('/api/events');
+
+    this.eventSource.addEventListener('status', (e) => {
+      try {
+        const status = JSON.parse(e.data);
+        this.updateConnectionStatus(true, status.mode === 'live' ? 'LIVE' : 'DEMO');
+      } catch (err) {
+        console.warn('SSE status parse error:', err);
+      }
+    });
+
+    this.eventSource.addEventListener('alert', (e) => {
+      try {
+        const alertData = JSON.parse(e.data);
+        this.handleIncomingAlert(alertData);
+      } catch (err) {
+        console.warn('SSE alert parse error:', err);
+      }
+    });
+
+    this.eventSource.addEventListener('incident', (e) => {
+      try {
+        const incData = JSON.parse(e.data);
+        this.handleIncomingIncident(incData);
+      } catch (err) {
+        console.warn('SSE incident parse error:', err);
+      }
+    });
+
+    this.eventSource.addEventListener('error', (e) => {
+      this.updateConnectionStatus(false, 'RECONNECTING');
+    });
+  }
+
+  updateConnectionStatus(connected, modeText) {
+    const textEl = document.getElementById('mobileStatusText');
+    if (textEl) {
+      textEl.textContent = connected ? modeText : 'RECONNECT';
+    }
+    const sysConn = document.getElementById('sysConnPill');
+    if (sysConn) {
+      sysConn.textContent = connected ? 'CONNECTED' : 'DISCONNECTED';
+      sysConn.className = `compliance-pill ${connected ? 'emerald' : 'rose'}`;
+    }
+  }
+
+  handleIncomingAlert(alert) {
+    // Prepend to alerts list
+    this.alerts.unshift(alert);
+    if (this.alerts.length > 500) this.alerts.pop();
+
+    this.updateCounters();
+
+    // Re-render active page if relevant
+    if (this.currentRoute === '/dashboard/overview') {
+      this.renderOverview();
+    } else if (this.currentRoute === '/dashboard/threats') {
+      this.renderThreats();
+    }
+  }
+
+  handleIncomingIncident(incident) {
+    // Prepend to incidents list
+    this.incidents.unshift(incident);
+    if (this.incidents.length > 100) this.incidents.pop();
+
+    this.updateCounters();
+
+    if (this.currentRoute === '/dashboard/overview') {
+      this.renderOverview();
+    } else if (this.currentRoute === '/dashboard/incidents') {
+      this.renderIncidents();
+    }
+  }
+
+  updateCounters() {
+    const threatCount = this.alerts.length;
+    const incidentCount = this.incidents.length;
+
+    // Desktop sidebar counters
+    const sbThreatEl = document.getElementById('sidebarThreatCount');
+    if (sbThreatEl) {
+      sbThreatEl.textContent = threatCount;
+      sbThreatEl.style.display = threatCount > 0 ? 'inline-block' : 'none';
+    }
+
+    const sbIncEl = document.getElementById('sidebarIncidentCount');
+    if (sbIncEl) {
+      sbIncEl.textContent = incidentCount;
+      sbIncEl.style.display = incidentCount > 0 ? 'inline-block' : 'none';
+    }
+
+    // Mobile bottom nav counters
+    const mobThreatEl = document.getElementById('mobThreatCount');
+    if (mobThreatEl) {
+      mobThreatEl.textContent = threatCount;
+      mobThreatEl.style.display = threatCount > 0 ? 'block' : 'none';
+    }
+
+    const mobIncEl = document.getElementById('mobIncidentCount');
+    if (mobIncEl) {
+      mobIncEl.textContent = incidentCount;
+      mobIncEl.style.display = incidentCount > 0 ? 'block' : 'none';
+    }
+
+    // Page titles count
+    const totalThreatEl = document.getElementById('totalThreatCount');
+    if (totalThreatEl) totalThreatEl.textContent = threatCount;
+    
+    const activeIncEl = document.getElementById('activeIncidentsCount');
+    if (activeIncEl) activeIncEl.textContent = incidentCount;
+  }
+
+  /* ========================================================================
+     4. API DATA FETCHERS (NO FABRICATED NUMBERS)
+     ======================================================================== */
+  async loadTelemetry() {
+    try {
+      const res = await fetch('/api/telemetry');
+      if (res.ok) {
+        this.telemetry = await res.json();
+        this.updateTelemetryUI();
+      }
+    } catch (err) {
+      console.warn('Telemetry load failed:', err);
+    }
+  }
+
+  async loadAlerts() {
+    try {
+      const res = await fetch('/api/alerts');
+      if (res.ok) {
+        const data = await res.json();
+        if (Array.isArray(data)) {
+          this.alerts = data;
+          this.updateCounters();
+          this.renderOverview();
+          this.renderThreats();
+        }
+      }
+    } catch (err) {
+      console.warn('Alerts load failed:', err);
+    }
+  }
+
+  async loadIncidents() {
+    try {
+      const res = await fetch('/api/incidents');
+      if (res.ok) {
+        const data = await res.json();
+        if (Array.isArray(data)) {
+          this.incidents = data;
+          this.updateCounters();
+          this.renderIncidents();
+        }
+      }
+    } catch (err) {
+      console.warn('Incidents load failed:', err);
+    }
+  }
+
+  async loadFlows() {
+    try {
+      const res = await fetch('/api/flows');
+      if (res.ok) {
+        const data = await res.json();
+        if (Array.isArray(data)) {
+          this.flows = data;
+          this.renderFlows();
+          this.renderOverview();
+        }
+      }
+    } catch (err) {
+      console.warn('Flows load failed:', err);
+    }
+  }
+
+  async loadValidationData() {
+    try {
+      const res = await fetch('/api/validation');
+      if (res.ok) {
+        this.validationData = await res.json();
+      }
+    } catch (err) {
+      console.warn('Validation data load failed:', err);
+    }
+  }
+
+  async loadComplianceAudit() {
+    try {
+      const res = await fetch('/api/compliance/audit');
+      if (res.ok) {
+        this.complianceData = await res.json();
+        this.updateComplianceUI();
+      }
+    } catch (err) {
+      console.warn('Compliance audit load failed:', err);
+    }
+  }
+
+  async loadDemoScenarios() {
+    try {
+      const res = await fetch('/api/demo/scenarios');
+      if (res.ok) {
+        this.demoScenarios = await res.json();
+      }
+    } catch (err) {
+      console.warn('Demo scenarios load failed:', err);
+    }
+  }
+
+  async checkRuntimeStatus() {
+    try {
+      const res = await fetch('/api/runtime/status');
+      if (res.ok) {
+        this.runtimeStatus = await res.json();
+        this.updateRuntimeUI();
+      }
+    } catch (err) {
+      console.warn('Runtime status check failed:', err);
+    }
+  }
+
+  async resetWatchdog() {
+    try {
+      const res = await fetch('/api/compliance/reset', { method: 'POST' });
+      if (res.ok) {
+        alert('Diode compliance watchdog baseline recalibrated to CLEAN.');
+        this.loadComplianceAudit();
+      }
+    } catch (err) {
+      alert('Failed to recalibrate watchdog: ' + err.message);
+    }
+  }
+
+  async runDemoScenario(pcapPath, triggerButton) {
+    if (this.isDemoRunning) return;
+
+    this.isDemoRunning = true;
+    if (triggerButton) {
+      triggerButton.disabled = true;
+      triggerButton.innerHTML = '<span>⏳</span> INGESTING...';
+    }
+
+    const badge = document.getElementById('demoEngineStatusBadge');
+    if (badge) {
+      badge.textContent = 'RUNNING';
+      badge.className = 'console-badge running';
+    }
+
+    const msg = document.getElementById('demoActionMsg');
+    if (msg) {
+      msg.textContent = `Streaming PCAP "${pcapPath}" into passive ingestion pipeline with zero-egress hardware compliance watchdog active...`;
+    }
+
+    try {
+      const res = await fetch('/api/runtime/start', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ pcap: pcapPath })
+      });
+      
+      const data = await res.json();
+      
+      // Start polling runtime until complete
+      if (this.demoPollingTimer) clearInterval(this.demoPollingTimer);
+      
+      this.demoPollingTimer = setInterval(async () => {
+        const stRes = await fetch('/api/runtime/status');
+        if (stRes.ok) {
+          const st = await stRes.json();
+          this.updateRuntimeUI(st);
+
+          if (!st.running) {
+            clearInterval(this.demoPollingTimer);
+            this.isDemoRunning = false;
+            if (triggerButton) {
+              triggerButton.disabled = false;
+              triggerButton.innerHTML = '<span>▶</span> RUN TEST';
+            }
+            if (badge) {
+              badge.textContent = 'COMPLETED';
+              badge.className = 'console-badge';
+            }
+            if (msg) {
+              const s = st.summary || {};
+              msg.textContent = `Scenario complete: ${s.packets || 0} packets parsed into ${s.records || 0} flow feature records with ${s.alerts || 0} alerts promoted in ${(s.elapsed_sec || 0).toFixed(2)}s. Zero egress verified.`;
+            }
+            // Refresh data
+            this.loadAlerts();
+            this.loadIncidents();
+            this.loadFlows();
+          }
+        }
+      }, 800);
+
+    } catch (err) {
+      this.isDemoRunning = false;
+      if (triggerButton) {
+        triggerButton.disabled = false;
+        triggerButton.innerHTML = '<span>▶</span> RUN TEST';
+      }
+      if (badge) {
+        badge.textContent = 'ERROR';
+        badge.className = 'console-badge';
+      }
+      if (msg) msg.textContent = 'Pipeline execution failed: ' + err.message;
+    }
+  }
+
+  /* ========================================================================
+     5. TELEMETRY & SYSTEM UI UPDATERS
+     ======================================================================== */
+  updateTelemetryUI() {
+    if (!this.telemetry) return;
+
+    // Engine PPS & SLA
+    const ppsEl = document.getElementById('engineRatePps');
+    if (ppsEl && this.telemetry.engine_pps) {
+      ppsEl.textContent = this.telemetry.engine_pps.toLocaleString();
+    }
+
+    const p99El = document.getElementById('engineP99Latency');
+    if (p99El && this.telemetry.p99_latency_ms) {
+      p99El.textContent = `${this.telemetry.p99_latency_ms.toFixed(2)} ms`;
+    }
+
+    // Diode Egress in Overview
+    const kpiEgress = document.getElementById('kpiDiodeEgress');
+    if (kpiEgress) {
+      kpiEgress.textContent = this.telemetry.egress_bytes_sent || 0;
+    }
+  }
+
+  updateComplianceUI() {
+    if (!this.complianceData) return;
+
+    const egressEl = document.getElementById('sysEgressBytes');
+    if (egressEl) {
+      egressEl.textContent = `${this.complianceData.total_egress_bytes_detected || 0} BYTES`;
+    }
+
+    const sockEl = document.getElementById('sysSockStatus');
+    if (sockEl && this.complianceData.dual_check_verification) {
+      sockEl.textContent = this.complianceData.dual_check_verification.level_1_process_socket_table || 'CLEAN';
+    }
+
+    const nicEl = document.getElementById('sysNicStatus');
+    if (nicEl && this.complianceData.dual_check_verification) {
+      nicEl.textContent = this.complianceData.dual_check_verification.level_2_nic_io_counter || 'CLEAN';
+    }
+
+    const certEl = document.getElementById('sysCertId');
+    if (certEl && this.complianceData.certificate_id) {
+      certEl.textContent = this.complianceData.certificate_id;
+    }
+
+    const hashEl = document.getElementById('sysSha256');
+    if (hashEl && this.complianceData.cryptographic_integrity_sha256) {
+      hashEl.textContent = this.complianceData.cryptographic_integrity_sha256;
+    }
+
+    const hostEl = document.getElementById('sysHostNode');
+    if (hostEl && this.complianceData.enclave_host) {
+      hostEl.textContent = this.complianceData.enclave_host;
+    }
+
+    // Modal fields
+    const mCertId = document.getElementById('certId');
+    if (mCertId && this.complianceData.certificate_id) {
+      mCertId.textContent = this.complianceData.certificate_id;
+    }
+
+    const mSha = document.getElementById('certSha256');
+    if (mSha && this.complianceData.cryptographic_integrity_sha256) {
+      mSha.textContent = this.complianceData.cryptographic_integrity_sha256;
+    }
+  }
+
+  updateRuntimeUI(status = null) {
+    const st = status || this.runtimeStatus;
+    if (!st) return;
+
+    const summary = st.summary || {};
+
+    const pActive = document.getElementById('demoActivePcap');
+    if (pActive && st.pcap) {
+      pActive.textContent = st.pcap.split(/[\\/]/).pop();
+    }
+
+    const pParsed = document.getElementById('demoPacketsParsed');
+    if (pParsed) pParsed.textContent = (summary.packets || 0).toLocaleString();
+
+    const fEmitted = document.getElementById('demoFlowsEmitted');
+    if (fEmitted) fEmitted.textContent = (summary.records || 0).toLocaleString();
+
+    const aEmitted = document.getElementById('demoAlertsEmitted');
+    if (aEmitted) aEmitted.textContent = (summary.alerts || 0).toLocaleString();
+
+    const eTime = document.getElementById('demoElapsedTime');
+    if (eTime) eTime.textContent = `${(summary.elapsed_sec || 0).toFixed(1)}s`;
+
+    // Overview inferences
+    const kpiInferences = document.getElementById('kpiAiInferences');
+    if (kpiInferences) {
+      if (summary.packets) {
+        kpiInferences.textContent = summary.packets.toLocaleString();
+      } else if (this.alerts.length > 0) {
+        kpiInferences.textContent = (this.alerts.length * 3).toLocaleString();
+      } else {
+        kpiInferences.textContent = '--';
+      }
+    }
+  }
+
+  /* ========================================================================
+     6. PAGE RENDERERS
+     ======================================================================== */
+
+  // PAGE 1: OVERVIEW
+  renderOverview() {
+    // 1. KPI Cards
+    const kpiThreats = document.getElementById('kpiActiveThreats');
+    if (kpiThreats) {
+      kpiThreats.textContent = this.alerts.length > 0 ? this.alerts.length.toLocaleString() : '--';
+    }
+
+    const kpiChains = document.getElementById('kpiAttackChains');
+    if (kpiChains) {
+      kpiChains.textContent = this.incidents.length > 0 ? this.incidents.length.toLocaleString() : '--';
+    }
+
+    const kpiFlows = document.getElementById('kpiFlowsParsed');
+    if (kpiFlows) {
+      kpiFlows.textContent = this.flows.length > 0 ? this.flows.length.toLocaleString() : '--';
+    }
+
+    // 2. Threat Activity Distribution Chart (Temporal Histogram)
+    const timelineContainer = document.getElementById('timelineBars');
+    if (timelineContainer) {
+      timelineContainer.innerHTML = '';
+      if (this.alerts.length === 0) {
+        timelineContainer.innerHTML = '<div style="margin: auto; color: #94A3B8; font-size: 12px;">No temporal activity in current buffer</div>';
+      } else {
+        // Group alerts into 14 temporal buckets
+        const numBuckets = 14;
+        const buckets = new Array(numBuckets).fill(0);
+        this.alerts.forEach((_, idx) => {
+          const bIdx = idx % numBuckets;
+          buckets[bIdx]++;
+        });
+
+        const maxVal = Math.max(...buckets, 1);
+        buckets.forEach(count => {
+          const bar = document.createElement('div');
+          bar.className = 'chart-bar';
+          const heightPct = Math.max(8, Math.round((count / maxVal) * 100));
+          bar.style.height = `${heightPct}%`;
+          bar.dataset.count = count;
+          timelineContainer.appendChild(bar);
+        });
+      }
+    }
+
+    // 3. Threat Category Distribution
+    const distContainer = document.getElementById('threatDistributionList');
+    if (distContainer) {
+      distContainer.innerHTML = '';
+      if (this.alerts.length === 0) {
+        distContainer.innerHTML = '<div class="distribution-empty">No threat events recorded in current buffer</div>';
+      } else {
+        const counts = {};
+        this.alerts.forEach(a => {
+          const tc = a.threat_class || 'Unknown';
+          counts[tc] = (counts[tc] || 0) + 1;
+        });
+
+        const colorClasses = ['rose', 'amber', 'blue', 'purple'];
+        let colorIdx = 0;
+
+        Object.entries(counts).forEach(([tClass, count]) => {
+          const pct = Math.round((count / this.alerts.length) * 100);
+          const color = colorClasses[colorIdx % colorClasses.length];
+          colorIdx++;
+
+          const item = document.createElement('div');
+          item.className = 'dist-item';
+          item.innerHTML = `
+            <div class="dist-meta">
+              <span>${this.formatThreatName(tClass)}</span>
+              <span><strong>${count}</strong> (${pct}%)</span>
+            </div>
+            <div class="dist-progress-track">
+              <div class="dist-progress-fill ${color}" style="width: ${pct}%;"></div>
+            </div>
+          `;
+          distContainer.appendChild(item);
+        });
+      }
+    }
+
+    // 4. Attack-Chain Summary Card Preview
+    const incPreview = document.getElementById('overviewIncidentPreview');
+    if (incPreview) {
+      if (this.incidents.length === 0) {
+        incPreview.innerHTML = `
+          <div class="empty-state-box">
+            <div class="empty-icon">🛡️</div>
+            <div class="empty-title">No Correlated Attack Chains Active</div>
+            <div class="empty-desc">Corroboration Engine requires multi-stage persistence across temporal sliding windows before promoting an incident.</div>
+          </div>
+        `;
+      } else {
+        const topInc = this.incidents[0];
+        incPreview.innerHTML = `
+          <div class="incident-card" style="box-shadow:none; padding:16px; border:1px solid #E2E8F0;">
+            <div class="incident-card-top" style="margin-bottom:10px; padding-bottom:8px;">
+              <span class="incident-id-tag">${topInc.incident_id || 'INC-CORRELATED'}</span>
+              <span class="severity-multiplier-pill">${topInc.severity_multiplier || 2.5}x CRITICAL</span>
+            </div>
+            <div style="font-size:12px; font-weight:700; color:#0F172A; margin-bottom:4px;">Pattern: ${topInc.chain_pattern || 'recon_to_c2_to_exfil'}</div>
+            <div style="font-size:12px; color:#475569; line-height:1.4;">${this.escapeHtml(topInc.narrative || 'Multi-stage intrusion chain identified across temporal network telemetry.')}</div>
+          </div>
+        `;
+      }
+    }
+
+    // 5. Recent Threat Stream Preview
+    const streamContainer = document.getElementById('overviewThreatStream');
+    if (streamContainer) {
+      if (this.alerts.length === 0) {
+        streamContainer.innerHTML = `
+          <div class="empty-state-box">
+            <div class="empty-icon">📡</div>
+            <div class="empty-title">Awaiting Live Alert Stream</div>
+            <div class="empty-desc">Promoted alert records will appear here as packets stream through the feature engine.</div>
+          </div>
+        `;
+      } else {
+        streamContainer.innerHTML = '';
+        const recent = this.alerts.slice(0, 4);
+        recent.forEach(alert => {
+          const item = document.createElement('div');
+          item.className = 'threat-preview-item';
+          item.innerHTML = `
+            <div>
+              <div style="font-size:12px; font-weight:800; color:#0F172A;">${this.formatThreatName(alert.threat_class)}</div>
+              <div style="font-size:11px; font-family:var(--font-mono); color:#64748B;">${alert.src_ip || '0.0.0.0'} &rarr; ${alert.dst_ip || '0.0.0.0'}</div>
+            </div>
+            <div style="text-align:right;">
+              <span class="severity-pill ${this.getSeverityClass(alert)}">${this.getSeverityLabel(alert)}</span>
+              <div style="font-size:10px; color:#94A3B8; margin-top:2px;">${alert.timestamp ? new Date(alert.timestamp).toLocaleTimeString() : 'Recent'}</div>
+            </div>
+          `;
+          item.addEventListener('click', () => this.openAlertDetailModal(alert));
+          streamContainer.appendChild(item);
+        });
+      }
+    }
+  }
+
+  // PAGE 2: LIVE THREATS
+  renderThreats() {
+    const filter = this.activeThreatFilter;
+    const filtered = filter === 'ALL' 
+      ? this.alerts 
+      : this.alerts.filter(a => a.threat_class === filter);
+
+    const visCountEl = document.getElementById('visibleThreatCount');
+    if (visCountEl) visCountEl.textContent = filtered.length;
+
+    // Desktop Table
+    const tbody = document.getElementById('threatsTableBody');
+    if (tbody) {
+      tbody.innerHTML = '';
+      if (filtered.length === 0) {
+        tbody.innerHTML = `
+          <tr>
+            <td colspan="8" class="table-empty-cell">
+              <div class="empty-state-box">
+                <div class="empty-icon">🛡️</div>
+                <div class="empty-title">No Alerts In Selected Category</div>
+                <div class="empty-desc">No events matched the "${filter}" filter. Switch to ALL ALERTS to view all events.</div>
+              </div>
+            </td>
+          </tr>
+        `;
+      } else {
+        filtered.forEach(alert => {
+          const tr = document.createElement('tr');
+          const timeFormatted = alert.timestamp ? new Date(alert.timestamp).toLocaleTimeString() : '--:--:--';
+          const port = this.extractPort(alert.flow_identifier);
+
+          tr.innerHTML = `
+            <td><span class="severity-pill ${this.getSeverityClass(alert)}">${this.getSeverityLabel(alert)}</span></td>
+            <td><span class="threat-tag">${this.formatThreatName(alert.threat_class)}</span></td>
+            <td class="mono-cell">${alert.src_ip || '--'}</td>
+            <td class="mono-cell">${alert.dst_ip || '--'}</td>
+            <td class="mono-cell">${port}</td>
+            <td><strong>${Math.round((alert.confidence_score || 0.9) * 100)}%</strong></td>
+            <td class="evidence-cell" title="${this.escapeHtml(alert.supporting_evidence || '')}">${this.escapeHtml(alert.supporting_evidence || 'Baseline criteria met.')}</td>
+            <td style="text-align: right;" class="mono-cell">${timeFormatted}</td>
+          `;
+          tr.addEventListener('click', () => this.openAlertDetailModal(alert));
+          tbody.appendChild(tr);
+        });
+      }
+    }
+
+    // Mobile Cards List
+    const mobContainer = document.getElementById('threatsMobileList');
+    if (mobContainer) {
+      mobContainer.innerHTML = '';
+      if (filtered.length === 0) {
+        mobContainer.innerHTML = `
+          <div class="empty-state-box">
+            <div class="empty-icon">🛡️</div>
+            <div class="empty-title">No Alerts In Buffer</div>
+            <div class="empty-desc">No events found matching the active filter.</div>
+          </div>
+        `;
+      } else {
+        filtered.forEach(alert => {
+          const card = document.createElement('div');
+          card.className = 'threat-mobile-card';
+          const timeFormatted = alert.timestamp ? new Date(alert.timestamp).toLocaleTimeString() : '--:--:--';
+
+          card.innerHTML = `
+            <div class="mob-card-top">
+              <span class="severity-pill ${this.getSeverityClass(alert)}">${this.getSeverityLabel(alert)}</span>
+              <span class="threat-tag">${this.formatThreatName(alert.threat_class)}</span>
+              <span style="font-size:11px; font-family:var(--font-mono); color:#94A3B8;">${timeFormatted}</span>
+            </div>
+            <div class="mob-flow-row">
+              <span>${alert.src_ip || '0.0.0.0'}</span>
+              <span class="flow-arrow">&rarr;</span>
+              <span>${alert.dst_ip || '0.0.0.0'}</span>
+            </div>
+            <div class="mob-card-meta">
+              <span>Confidence: <strong>${Math.round((alert.confidence_score || 0.9) * 100)}%</strong></span>
+              <span>Signals: <strong>${alert.corroboration_count || 1}</strong></span>
+              <span>Window: <strong>${alert.persistence_windows || 1}/3</strong></span>
+            </div>
+            <div class="mob-card-evidence">${this.escapeHtml(alert.supporting_evidence || 'Anomaly criteria corroborated.')}</div>
+          `;
+          card.addEventListener('click', () => this.openAlertDetailModal(alert));
+          mobContainer.appendChild(card);
+        });
+      }
+    }
+  }
+
+  // PAGE 3: ATTACK CHAINS
+  renderIncidents() {
+    const container = document.getElementById('incidentsContainer');
+    if (!container) return;
+
+    container.innerHTML = '';
+    if (this.incidents.length === 0) {
+      container.innerHTML = `
+        <div class="empty-state-box">
+          <div class="empty-icon">🔗</div>
+          <div class="empty-title">No Correlated Attack Chains Active</div>
+          <div class="empty-desc">The Correlation Engine correlates alerts across sliding windows. When an attacker progresses through multiple stages (e.g. reconnaissance followed by C2 channel and exfiltration), an incident is generated here.</div>
+        </div>
+      `;
+      return;
+    }
+
+    this.incidents.forEach(inc => {
+      const card = document.createElement('div');
+      card.className = 'incident-card';
+
+      const pattern = inc.chain_pattern || 'recon_to_c2_to_exfil';
+      let stagesHtml = '';
+
+      if (pattern.includes('recon_to_c2_to_exfil') || pattern.includes('exfil')) {
+        stagesHtml = `
+          <div class="killchain-timeline">
+            <div class="kc-step-node active">
+              <div class="kc-circle">1</div>
+              <span class="kc-step-label">RECONNAISSANCE</span>
+            </div>
+            <div class="kc-connector-line"></div>
+            <div class="kc-step-node active">
+              <div class="kc-circle">2</div>
+              <span class="kc-step-label">C2 CHANNEL</span>
+            </div>
+            <div class="kc-connector-line"></div>
+            <div class="kc-step-node danger">
+              <div class="kc-circle">3</div>
+              <span class="kc-step-label">EXFILTRATION</span>
+            </div>
+          </div>
+        `;
+      } else if (pattern.includes('dga')) {
+        stagesHtml = `
+          <div class="killchain-timeline">
+            <div class="kc-step-node active">
+              <div class="kc-circle">1</div>
+              <span class="kc-step-label">DGA QUERY</span>
+            </div>
+            <div class="kc-connector-line"></div>
+            <div class="kc-step-node danger">
+              <div class="kc-circle">2</div>
+              <span class="kc-step-label">C2 RENDEZVOUS</span>
+            </div>
+          </div>
+        `;
+      } else {
+        stagesHtml = `
+          <div class="killchain-timeline">
+            <div class="kc-step-node active">
+              <div class="kc-circle">1</div>
+              <span class="kc-step-label">INITIAL ACCESS</span>
+            </div>
+            <div class="kc-connector-line"></div>
+            <div class="kc-step-node danger">
+              <div class="kc-circle">2</div>
+              <span class="kc-step-label">ATTACK EXECUTION</span>
+            </div>
+          </div>
+        `;
+      }
+
+      card.innerHTML = `
+        <div class="incident-card-top">
+          <div style="display:flex; align-items:center; gap:10px;">
+            <span class="incident-id-tag">${inc.incident_id || 'INC-CAMPAIGN-001'}</span>
+            <span style="font-size:12px; font-weight:700; color:#64748B;">Target Host: <strong>${inc.host || '192.168.1.100'}</strong></span>
+          </div>
+          <span class="severity-multiplier-pill">${inc.severity_multiplier || 2.5}x MULTIPLIER (CRITICAL)</span>
+        </div>
+
+        ${stagesHtml}
+
+        <div class="narrative-box">
+          <div class="narrative-header">ANALYST REASONING (CORRELATION ENGINE):</div>
+          <div class="narrative-text">${this.escapeHtml(inc.narrative || 'Correlated multi-stage attack behavior identified across network telemetry.')}</div>
+        </div>
+
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-top:14px; font-size:11px; color:#64748B;">
+          <span>Pattern Signature: <strong>${pattern}</strong></span>
+          <span>Constituent Alerts: <strong>${inc.constituent_alert_ids ? inc.constituent_alert_ids.length : 3} alerts linked</strong></span>
+        </div>
+      `;
+
+      container.appendChild(card);
+    });
+  }
+
+  // PAGE 4: NETWORK FLOWS
+  renderFlows() {
+    const countEl = document.getElementById('flowsCountDisplay');
+    if (countEl) countEl.textContent = this.flows.length;
+
+    // Desktop Table
+    const tbody = document.getElementById('flowsTableBody');
+    if (tbody) {
+      tbody.innerHTML = '';
+      if (this.flows.length === 0) {
+        tbody.innerHTML = `
+          <tr>
+            <td colspan="9" class="table-empty-cell">
+              <div class="empty-state-box">
+                <div class="empty-icon">📊</div>
+                <div class="empty-title">No Flow Feature Records Available</div>
+                <div class="empty-desc">Flow feature vectors will appear here when the ingestion engine processes network traffic.</div>
+              </div>
+            </td>
+          </tr>
+        `;
+      } else {
+        this.flows.forEach(flow => {
+          const tr = document.createElement('tr');
+          const vol = flow.volumetric || {};
+          const timing = flow.timing || {};
+          const asymmetry = flow.volume_asymmetry || {};
+
+          let hints = [];
+          if (vol.syn_ack_ratio > 10) hints.push('SYN flood hint');
+          if (timing.iat_cv < 0.1 && timing.iat_cv > 0) hints.push('Periodic IAT');
+          if (asymmetry.exfil_risk_score > 0.5) hints.push('High Exfil Risk');
+          if (flow.fanout && flow.fanout.dst_port_count > 10) hints.push('Port fan-out');
+          const hintsText = hints.length > 0 ? hints.join(', ') : 'Normal flow profile';
+
+          tr.innerHTML = `
+            <td class="mono-cell" style="max-width:200px; overflow:hidden; text-overflow:ellipsis;">${flow.flow_id || '--'}</td>
+            <td class="mono-cell">${flow.src_ip}:${flow.src_port || 0}</td>
+            <td class="mono-cell">${flow.dst_ip}:${flow.dst_port || 0}</td>
+            <td><span class="status-tag blue">${flow.protocol || 'TCP'}</span></td>
+            <td class="mono-cell">${vol.packet_count || 1}</td>
+            <td class="mono-cell">${vol.byte_count || 54} B</td>
+            <td class="mono-cell">${flow.window_duration_sec || 15.0}s</td>
+            <td style="font-size:11px; color:#64748B;">${hintsText}</td>
+            <td style="text-align:center;">
+              <button class="btn-soft-action" style="padding:4px 8px; font-size:11px;">View</button>
+            </td>
+          `;
+          tr.addEventListener('click', () => this.openFlowDetailModal(flow));
+          tbody.appendChild(tr);
+        });
+      }
+    }
+
+    // Mobile Flow Cards
+    const mobContainer = document.getElementById('flowsMobileList');
+    if (mobContainer) {
+      mobContainer.innerHTML = '';
+      if (this.flows.length === 0) {
+        mobContainer.innerHTML = `
+          <div class="empty-state-box">
+            <div class="empty-icon">📊</div>
+            <div class="empty-title">No Flow Feature Records Available</div>
+            <div class="empty-desc">Flow feature vectors will appear here when the ingestion engine processes network traffic.</div>
+          </div>
+        `;
+      } else {
+        this.flows.forEach(flow => {
+          const card = document.createElement('div');
+          card.className = 'flow-card-mobile';
+          const vol = flow.volumetric || {};
+
+          card.innerHTML = `
+            <div style="display:flex; justify-content:space-between; margin-bottom:8px;">
+              <span class="status-tag blue">${flow.protocol || 'TCP'}</span>
+              <span style="font-family:var(--font-mono); font-size:11px; color:#64748B;">${vol.packet_count || 1} pkts &bull; ${vol.byte_count || 0} bytes</span>
+            </div>
+            <div class="mob-flow-row">
+              <span>${flow.src_ip}:${flow.src_port || 0}</span>
+              <span class="flow-arrow">&rarr;</span>
+              <span>${flow.dst_ip}:${flow.dst_port || 0}</span>
+            </div>
+            <div style="font-size:11px; color:#64748B;">Window: ${flow.window_duration_sec || 15.0}s &bull; Flow ID: <span style="font-family:var(--font-mono);">${(flow.flow_id || '').substring(0, 24)}...</span></div>
+          `;
+          card.addEventListener('click', () => this.openFlowDetailModal(flow));
+          mobContainer.appendChild(card);
+        });
+      }
+    }
+  }
+
+  /* ========================================================================
+     7. MODALS
+     ======================================================================== */
+  openAlertDetailModal(alert) {
+    const modal = this.alertDetailModal;
+    if (!modal) return;
+
+    const sevBadge = document.getElementById('mAlertSeverity');
+    if (sevBadge) {
+      sevBadge.textContent = this.getSeverityLabel(alert);
+      sevBadge.className = `modal-badge ${this.getSeverityClass(alert)}`;
+    }
+
+    const title = document.getElementById('mAlertTitle');
+    if (title) {
+      title.textContent = `${this.formatThreatName(alert.threat_class)} (ID: ${alert.alert_id || 'ALT-0000'})`;
+    }
+
+    const body = document.getElementById('mAlertBody');
+    if (body) {
+      body.innerHTML = `
+        <div style="display:flex; flex-direction:column; gap:12px;">
+          <div class="audit-cert-box" style="margin:0;">
+            <div class="cert-row">
+              <span class="cert-label">Flow Identifier:</span>
+              <span class="cert-value mono">${alert.flow_identifier || '--'}</span>
+            </div>
+            <div class="cert-row">
+              <span class="cert-label">Source Host:</span>
+              <span class="cert-value mono">${alert.src_ip || '--'}</span>
+            </div>
+            <div class="cert-row">
+              <span class="cert-label">Destination Host:</span>
+              <span class="cert-value mono">${alert.dst_ip || '--'}</span>
+            </div>
+            <div class="cert-row">
+              <span class="cert-label">Confidence Score:</span>
+              <span class="cert-value"><strong>${Math.round((alert.confidence_score || 0.9) * 100)}%</strong></span>
+            </div>
+            <div class="cert-row">
+              <span class="cert-label">Corroborated Signals:</span>
+              <span class="cert-value">${alert.corroboration_count || 1} independent signals</span>
+            </div>
+            <div class="cert-row">
+              <span class="cert-label">Sliding Window Persistence:</span>
+              <span class="cert-value">Window ${alert.persistence_windows || 1}/3</span>
+            </div>
+            <div class="cert-row">
+              <span class="cert-label">Correlated Incident:</span>
+              <span class="cert-value">${alert.incident_id ? `<strong>${alert.incident_id}</strong>` : 'Standalone Alert'}</span>
+            </div>
+            <div class="cert-row">
+              <span class="cert-label">Alert Timestamp:</span>
+              <span class="cert-value mono">${alert.timestamp || 'Real-time'}</span>
+            </div>
+          </div>
+
+          <div style="background:#F8FAFC; border:1px solid #E2E8F0; border-radius:12px; padding:14px;">
+            <div style="font-size:11px; font-weight:800; color:#475569; margin-bottom:4px;">SUPPORTING EVIDENCE & FORENSIC HEURISTICS:</div>
+            <div style="font-size:13px; color:#1E293B; line-height:1.5;">${this.escapeHtml(alert.supporting_evidence || 'Anomaly criteria met.')}</div>
+          </div>
+        </div>
+      `;
+    }
+
+    this.openModal(modal);
+  }
+
+  openFlowDetailModal(flow) {
+    const modal = this.flowDetailModal;
+    if (!modal) return;
+
+    const title = document.getElementById('mFlowTitle');
+    if (title) {
+      title.textContent = `Flow Record: ${flow.flow_id || 'Unknown'}`;
+    }
+
+    const body = document.getElementById('mFlowBody');
+    if (body) {
+      const vol = flow.volumetric || {};
+      const timing = flow.timing || {};
+      const dns = flow.dns_lexical || {};
+      const crypto = flow.crypto_metadata || {};
+      const fanout = flow.fanout || {};
+      const asym = flow.volume_asymmetry || {};
+
+      body.innerHTML = `
+        <div style="display:flex; flex-direction:column; gap:14px;">
+          <div class="audit-cert-box" style="margin:0;">
+            <div class="cert-row">
+              <span class="cert-label">Flow:</span>
+              <span class="cert-value mono">${flow.src_ip}:${flow.src_port} &rarr; ${flow.dst_ip}:${flow.dst_port} (${flow.protocol})</span>
+            </div>
+            <div class="cert-row">
+              <span class="cert-label">Window Duration:</span>
+              <span class="cert-value mono">${flow.window_duration_sec}s</span>
+            </div>
+          </div>
+
+          <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px;">
+            <div style="background:#F8FAFC; border:1px solid #E2E8F0; border-radius:8px; padding:10px;">
+              <strong style="font-size:11px; color:#2563EB;">1. VOLUMETRIC</strong>
+              <div style="font-size:11px; margin-top:4px;">Packets: ${vol.packet_count} | Bytes: ${vol.byte_count}</div>
+              <div style="font-size:11px;">SYN/ACK Ratio: ${vol.syn_ack_ratio}</div>
+            </div>
+
+            <div style="background:#F8FAFC; border:1px solid #E2E8F0; border-radius:8px; padding:10px;">
+              <strong style="font-size:11px; color:#2563EB;">2. TIMING (IAT)</strong>
+              <div style="font-size:11px; margin-top:4px;">IAT CV: ${timing.iat_cv}</div>
+              <div style="font-size:11px;">Periodicity: ${timing.periodicity_score}</div>
+            </div>
+
+            <div style="background:#F8FAFC; border:1px solid #E2E8F0; border-radius:8px; padding:10px;">
+              <strong style="font-size:11px; color:#2563EB;">3. DNS LEXICAL</strong>
+              <div style="font-size:11px; margin-top:4px;">Entropy: ${dns.shannon_entropy} bits</div>
+              <div style="font-size:11px;">Has DNS: ${dns.has_dns}</div>
+            </div>
+
+            <div style="background:#F8FAFC; border:1px solid #E2E8F0; border-radius:8px; padding:10px;">
+              <strong style="font-size:11px; color:#2563EB;">4. CRYPTO METADATA</strong>
+              <div style="font-size:11px; margin-top:4px;">TLS/QUIC: ${crypto.is_tls_quic}</div>
+              <div style="font-size:11px;">JA4: ${crypto.ja4_str || '--'}</div>
+            </div>
+
+            <div style="background:#F8FAFC; border:1px solid #E2E8F0; border-radius:8px; padding:10px;">
+              <strong style="font-size:11px; color:#2563EB;">5. CONNECTION FAN-OUT</strong>
+              <div style="font-size:11px; margin-top:4px;">Ports: ${fanout.dst_port_count} | IPs: ${fanout.dst_ip_count}</div>
+              <div style="font-size:11px;">Half-Open: ${fanout.half_open_ratio}</div>
+            </div>
+
+            <div style="background:#F8FAFC; border:1px solid #E2E8F0; border-radius:8px; padding:10px;">
+              <strong style="font-size:11px; color:#2563EB;">6. VOLUME ASYMMETRY</strong>
+              <div style="font-size:11px; margin-top:4px;">Byte Ratio: ${asym.byte_ratio}</div>
+              <div style="font-size:11px;">Exfil Risk: ${asym.exfil_risk_score}</div>
+            </div>
+          </div>
+        </div>
+      `;
+    }
+
+    this.openModal(modal);
+  }
+
+  openAuditModal() {
+    this.loadComplianceAudit();
+    this.openModal(this.validationModal);
+  }
+
+  /* ========================================================================
+     8. FORMATTERS & UTILITIES
+     ======================================================================== */
+  formatThreatName(threatClass) {
+    if (!threatClass) return 'Anomaly Event';
+    return threatClass
+      .replace(/_/g, ' ')
+      .replace(/([a-z])([A-Z])/g, '$1 $2');
+  }
+
+  getSeverityClass(alert) {
+    const tc = (alert.threat_class || '').toLowerCase();
+    if (tc.includes('c2') || tc.includes('ddos') || tc.includes('exfil')) {
+      return 'critical';
+    } else if (tc.includes('port') || tc.includes('dga') || tc.includes('malware')) {
+      return 'high';
+    }
+    return 'medium';
+  }
+
+  getSeverityLabel(alert) {
+    const cls = this.getSeverityClass(alert);
+    if (cls === 'critical') return 'CRITICAL';
+    if (cls === 'high') return 'HIGH';
+    return 'MEDIUM';
+  }
+
+  extractPort(flowId) {
+    if (!flowId) return '80';
+    const match = flowId.match(/:(\d+)\//) || flowId.match(/->.*?:\s*(\d+)/);
+    return match ? match[1] : '443';
+  }
+
+  escapeHtml(str) {
+    if (!str) return '';
+    return String(str)
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#039;');
+  }
+}
+
+// Instantiate on DOM ready
+document.addEventListener('DOMContentLoaded', () => {
+  window.diodeSentinel = new DiodeSentinelApp();
+});

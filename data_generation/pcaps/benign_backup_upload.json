@@ -1,0 +1,11 @@
+{
+  "pcap_file": "benign_backup_upload.pcap",
+  "label": "benign",
+  "threat_class": "none",
+  "traffic_pattern": "scheduled_backup_upload",
+  "description": "Legitimate enterprise high-volume backup upload to Amazon S3 (ASN 16509)",
+  "total_packets": 380,
+  "total_outbound_bytes": 350000,
+  "duration_sec": 0.79,
+  "generated_at": "2026-09-04T13:14:34Z"
+}

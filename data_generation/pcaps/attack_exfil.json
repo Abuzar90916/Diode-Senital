@@ -1,0 +1,9 @@
+{
+  "pcap_file": "attack_exfil.pcap",
+  "threat_class": "f_data_exfiltration",
+  "insider_ip": "192.168.1.99",
+  "drop_server": "198.51.100.88",
+  "total_outbound_bytes": 140000,
+  "expected_byte_ratio": ">20.0",
+  "expected_exfil_score": ">0.8"
+}

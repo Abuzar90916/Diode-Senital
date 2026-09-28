@@ -1,0 +1,372 @@
+"""
+Diode-Sentinel Real-World Holdout Evaluation Suite (SIH PS 26145).
+
+Evaluates the complete Diode-Sentinel detection pipeline (ingestion -> feature aggregation
+-> ThreatCore detectors -> Corroboration Engine -> Sliding-Window Persistence Filter)
+against authentic, non-synthetic network traffic from the CTU-13 research dataset
+(Scenario 9: Neris Botnet, Stratosphere IPS Research Laboratory, CTU Prague).
+
+Integrity Constraints:
+1. Uses PRODUCTION persistence settings (required_windows=3, window_ttl_seconds=300).
+   NO weakening/override of persistence defenses.
+2. Ground-Truth Rigor: Evaluates recall on genuine botnet attack flows (C2, portscanning,
+   DGA, spam) while accounting for infected host benign traffic (local DNS/NetBIOS)
+   and pure benign normal background traffic.
+3. Reports detection rate (Recall), False Positive Rate (FPR), and alerts per hour
+   of real-world traffic.
+"""
+
+import os
+import sys
+from collections import Counter, defaultdict
+from typing import Dict, List, Any, Tuple
+
+BASE_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+if BASE_DIR not in sys.path:
+    sys.path.insert(0, BASE_DIR)
+
+from schemas.flow_feature_record import FlowFeatureRecord
+from schemas.alert_record import AlertCandidate, Alert, ThreatClass
+from ingestion.pcap_reader import PcapStreamingReader
+from features.flow_aggregator import FlowAggregator
+from threatcore import (
+    PortScanDetector,
+    DDoSDetector,
+    C2BeaconDetector,
+    DGADNSDetector,
+    EncryptedMalwareDetector,
+    ExfiltrationDetector,
+)
+from threatcore.base_detector import BaselineStore
+from fp_reduction.corroboration import CorroborationEngine
+from fp_reduction.persistence_filter import PersistenceFilter
+from fp_reduction.allowlists import AllowlistManager
+from correlation import EntityGraph, ChainMatcher
+
+
+class HoldoutEvaluator:
+    """
+    Executes holdout evaluation against authentic CTU-13 packet captures
+    using full production detection and FP-reduction pipelines.
+    """
+
+    def __init__(self, required_windows: int = 3, window_ttl_seconds: int = 300):
+        self.allowlists = AllowlistManager()
+        self.baseline_store = BaselineStore()
+        self.corroborator = CorroborationEngine(default_min_signals=2)
+        # Production persistence: requires 3 consecutive windows
+        self.persistence_filter = PersistenceFilter(
+            required_windows=required_windows,
+            window_ttl_seconds=window_ttl_seconds,
+            min_window_interval_sec=2.0,
+        )
+        self.entity_graph = EntityGraph()
+        self.chain_matcher = ChainMatcher(entity_graph=self.entity_graph)
+
+        self.detectors = [
+            PortScanDetector(allowlist_manager=self.allowlists),
+            DDoSDetector(allowlist_manager=self.allowlists),
+            C2BeaconDetector(allowlist_manager=self.allowlists),
+            DGADNSDetector(allowlist_manager=self.allowlists),
+            EncryptedMalwareDetector(allowlist_manager=self.allowlists),
+            ExfiltrationDetector(allowlist_manager=self.allowlists),
+        ]
+
+    def extract_or_load_records(self, pcap_path: str, cache_jsonl: str = None) -> List[FlowFeatureRecord]:
+        """Extracts FlowFeatureRecords via FlowAggregator or reads cached JSONL."""
+        if cache_jsonl and os.path.exists(cache_jsonl) and os.path.getsize(cache_jsonl) > 1000:
+            records = []
+            with open(cache_jsonl, "r", encoding="utf-8") as f:
+                for line in f:
+                    line = line.strip()
+                    if line:
+                        records.append(FlowFeatureRecord.model_validate_json(line))
+            return records
+
+        reader = PcapStreamingReader(pcap_path)
+        aggregator = FlowAggregator(window_size_sec=30.0, slide_interval_sec=10.0)
+        records = []
+        for pkt in reader.stream():
+            recs = aggregator.process_packet(pkt)
+            if recs:
+                records.extend(recs)
+        records.extend(aggregator.flush())
+
+        if cache_jsonl:
+            os.makedirs(os.path.dirname(cache_jsonl), exist_ok=True)
+            with open(cache_jsonl, "w", encoding="utf-8") as f:
+                for r in records:
+                    f.write(r.model_dump_json() + "\n")
+
+        return records
+
+    @staticmethod
+    def is_genuine_attack_flow(record: FlowFeatureRecord, infected_ip: str = "147.32.84.165") -> bool:
+        """
+        Per-flow ground truth classifier for CTU-13 Scenario 9.
+        Authentic attack flows involving the infected host (portscan sweeps, C2 IRC, spam, DDoS).
+        Excludes routine campus infrastructure traffic (internal DNS to 147.32.80.9, NetBIOS).
+        """
+        is_infected_involved = (record.src_ip == infected_ip or record.dst_ip == infected_ip)
+        if not is_infected_involved:
+            return False
+
+        # Legitimate campus infrastructure traffic generated by infected host
+        peer_ip = record.dst_ip if record.src_ip == infected_ip else record.src_ip
+        peer_port = record.dst_port if record.src_ip == infected_ip else record.src_port
+
+        # Local DNS resolver:
+        # If the infected host is resolving DGA/botnet domains (e.g. w.nucleardiscover.com,
+        # 897234kjdsf4523234.com) through the campus resolver, it is authentic botnet C2/DGA activity.
+        if peer_ip in ("147.32.80.9", "147.32.84.130") and peer_port == 53:
+            if record.dns_lexical and (record.dns_lexical.shannon_entropy > 2.8 or record.dns_lexical.is_tunnel_candidate or record.dns_lexical.has_dns):
+                return True
+            return False
+
+        # Windows local broadcast NetBIOS
+        if peer_ip.startswith("147.32.84.") and peer_port in (137, 138, 139):
+            return False
+
+        # Any external communication or scanning attempt by infected host is genuine botnet activity
+        return True
+
+    def evaluate(
+        self,
+        botnet_pcap: str,
+        normal_pcap: str,
+        botnet_cache: str = None,
+        normal_cache: str = None,
+    ) -> Dict[str, Any]:
+        """Runs evaluation over positive and negative real-world traffic."""
+        print("=" * 75)
+        print("  DIODE-SENTINEL: REAL-WORLD HOLDOUT EVALUATION (CTU-13 SCENARIO 9)")
+        print("  Production Settings: required_windows=3, window_ttl=300s, min_signals=2")
+        print("=" * 75)
+
+        print("\n[*] Ingesting positive attack capture (ctu13_neris_real_botnet_10k.pcap)...")
+        botnet_records = self.extract_or_load_records(botnet_pcap, botnet_cache)
+        print(f"    Loaded {len(botnet_records)} flow records from botnet capture.")
+
+        print("\n[*] Ingesting negative benign capture (ctu13_real_normal.pcap)...")
+        normal_records = self.extract_or_load_records(normal_pcap, normal_cache)
+        print(f"    Loaded {len(normal_records)} flow records from normal capture.")
+
+        # Tracking metrics
+        stats = {
+            "botnet": {
+                "total_records": len(botnet_records),
+                "attack_records": 0,
+                "benign_records": 0,
+                "unique_attack_flows": set(),
+                "unique_benign_flows": set(),
+                "candidates": Counter(),
+                "corroborated": Counter(),
+                "promoted": Counter(),
+                "detected_attack_flows": set(),
+                "det_unique_attack_flows": defaultdict(set),
+                "unlabeled_promoted_alerts": Counter(),
+                "unlabeled_unique_flows_alerted": defaultdict(set),
+            },
+            "normal": {
+                "total_records": len(normal_records),
+                "unique_normal_flows": set(),
+                "candidates": Counter(),
+                "corroborated": Counter(),
+                "promoted": Counter(),
+                "alerts": [],
+                "det_unique_normal_flows": defaultdict(set),
+            },
+        }
+
+        # 1. Evaluate Botnet Capture
+        botnet_promoted_alerts: List[Alert] = []
+        for i, rec in enumerate(botnet_records):
+            is_attack = self.is_genuine_attack_flow(rec)
+            if is_attack:
+                stats["botnet"]["attack_records"] += 1
+                stats["botnet"]["unique_attack_flows"].add(rec.flow_id)
+            else:
+                stats["botnet"]["benign_records"] += 1
+                stats["botnet"]["unique_benign_flows"].add(rec.flow_id)
+
+            for detector in self.detectors:
+                det_name = detector.__class__.__name__
+                cand = detector.detect(rec, self.baseline_store)
+                if cand:
+                    stats["botnet"]["candidates"][det_name] += 1
+                    passed, count, _ = self.corroborator.evaluate_candidate(cand)
+                    if passed:
+                        stats["botnet"]["corroborated"][det_name] += 1
+                        promoted, pcount, alert = self.persistence_filter.process_candidate(cand, count)
+                        if promoted and alert:
+                            stats["botnet"]["promoted"][det_name] += 1
+                            botnet_promoted_alerts.append(alert)
+                            if is_attack:
+                                stats["botnet"]["detected_attack_flows"].add(rec.flow_id)
+                                stats["botnet"]["det_unique_attack_flows"][det_name].add(rec.flow_id)
+                            else:
+                                stats["botnet"]["unlabeled_promoted_alerts"][det_name] += 1
+                                stats["botnet"]["unlabeled_unique_flows_alerted"][det_name].add(rec.flow_id)
+
+            # Mirror RuntimeDetectionEngine: learn only after evaluating the
+            # current record so the observation cannot explain itself away.
+            self.baseline_store.update(rec.src_ip, "volumetric_rate", rec.volumetric.packet_rate_pps, rec.window_end)
+            self.baseline_store.update(rec.src_ip, "byte_ratio", rec.volume_asymmetry.byte_ratio, rec.window_end)
+            self.baseline_store.update(rec.src_ip, "outbound_byte_rate_bps", rec.volume_asymmetry.outbound_byte_rate_bps, rec.window_end)
+
+        # 2. Reset persistence filter for isolated clean evaluation of Normal Capture
+        self.persistence_filter = PersistenceFilter(
+            required_windows=3, window_ttl_seconds=300, min_window_interval_sec=2.0
+        )
+        # The live runtime starts a fresh detector engine for a separate
+        # capture, so do not carry botnet baseline state into the normal set.
+        self.baseline_store = BaselineStore()
+
+        # Evaluate Normal Capture
+        for i, rec in enumerate(normal_records):
+            stats["normal"]["unique_normal_flows"].add(rec.flow_id)
+            for detector in self.detectors:
+                det_name = detector.__class__.__name__
+                cand = detector.detect(rec, self.baseline_store)
+                if cand:
+                    stats["normal"]["candidates"][det_name] += 1
+                    passed, count, _ = self.corroborator.evaluate_candidate(cand)
+                    if passed:
+                        stats["normal"]["corroborated"][det_name] += 1
+                        promoted, pcount, alert = self.persistence_filter.process_candidate(cand, count)
+                        if promoted and alert:
+                            stats["normal"]["promoted"][det_name] += 1
+                            stats["normal"]["alerts"].append(alert)
+                            stats["normal"]["det_unique_normal_flows"][det_name].add(rec.flow_id)
+
+            self.baseline_store.update(rec.src_ip, "volumetric_rate", rec.volumetric.packet_rate_pps, rec.window_end)
+            self.baseline_store.update(rec.src_ip, "byte_ratio", rec.volume_asymmetry.byte_ratio, rec.window_end)
+            self.baseline_store.update(rec.src_ip, "outbound_byte_rate_bps", rec.volume_asymmetry.outbound_byte_rate_bps, rec.window_end)
+
+        # Calculate reconciled metrics
+        # (A) Flow Entity Level (Deduplicated 5-tuples)
+        tp_flows = len(stats["botnet"]["detected_attack_flows"])
+        total_attack_flows = len(stats["botnet"]["unique_attack_flows"])
+        fn_flows = max(0, total_attack_flows - tp_flows)
+        flow_recall = (tp_flows / total_attack_flows) if total_attack_flows > 0 else 0.0
+
+        total_normal_flows = len(stats["normal"]["unique_normal_flows"])
+        fp_flows = len({a.flow_identifier for a in stats["normal"]["alerts"]})
+        flow_fpr = (fp_flows / total_normal_flows) if total_normal_flows > 0 else 0.0
+
+        # (B) Sliding-Window Event Stream Level (Raw 15s Window Records)
+        total_attack_records = stats["botnet"]["attack_records"]
+        total_normal_records = stats["normal"]["total_records"]
+        botnet_promoted_windows = sum(stats["botnet"]["promoted"].values())
+        normal_promoted_windows = sum(stats["normal"]["promoted"].values())
+        window_fpr = (normal_promoted_windows / total_normal_records) if total_normal_records > 0 else 0.0
+
+        # Estimate capture duration based on timestamps in normal records
+        if normal_records:
+            t_start = min(r.window_start for r in normal_records)
+            t_end = max(r.window_end for r in normal_records)
+            duration_hours = max(0.1, (t_end - t_start).total_seconds() / 3600.0)
+        else:
+            duration_hours = 1.0
+
+        alerts_per_hour = normal_promoted_windows / duration_hours
+
+        print("\n" + "=" * 78)
+        print("  HOLDOUT PERFORMANCE METRICS SUMMARY (CTU-13 REAL-WORLD TRAFFIC)")
+        print("=" * 78)
+        print("  [LEVEL 1: DEDUPLICATED FLOW 5-TUPLE ENTITIES]")
+        print(f"    Positive Botnet Unique Flows:    {total_attack_flows:,}")
+        print(f"    Detected Attack Flows (TP):      {tp_flows:,}")
+        print(f"    Missed Attack Flows (FN):        {fn_flows:,}")
+        print(f"    --> FLOW-LEVEL BOTNET RECALL:    {flow_recall * 100:.2f}% ({tp_flows}/{total_attack_flows})")
+        print("    " + "-" * 70)
+        print(f"    Negative Normal Unique Flows:    {total_normal_flows:,}")
+        print(f"    Normal False Alarm Flows (FP):   {fp_flows:,}")
+        print(f"    --> FLOW-LEVEL FALSE POSITIVE:   {flow_fpr * 100:.2f}% ({fp_flows}/{total_normal_flows})")
+        print("\n  [LEVEL 2: SLIDING-WINDOW EVENT STREAM (15s Windows, 5s Slide)]")
+        print(f"    Total Attack Window Records:     {total_attack_records:,}")
+        print(f"    Total Promoted Attack Alerts:    {botnet_promoted_windows:,}")
+        print(f"    Total Normal Window Records:     {total_normal_records:,}")
+        print(f"    Total Promoted Normal Alerts:    {normal_promoted_windows:,} alerts")
+        print(f"    Estimated Capture Duration:      {duration_hours:.2f} hours")
+        print(f"    --> OPERATIONAL ALERTS PER HOUR: {alerts_per_hour:.1f} alerts/hr")
+        print("\n  [LEVEL 3: UNLABELED / BACKGROUND TRAFFIC ACCOUNTING]")
+        unlabeled_flows_count = len(stats["botnet"]["unique_benign_flows"])
+        unlabeled_records_count = stats["botnet"]["benign_records"]
+        unlabeled_alerts_count = sum(stats["botnet"]["unlabeled_promoted_alerts"].values())
+        total_eval_flows = total_attack_flows + total_normal_flows + unlabeled_flows_count
+        unlabeled_flow_pct = (unlabeled_flows_count / total_eval_flows * 100) if total_eval_flows > 0 else 0.0
+        total_alerts_across_eval = botnet_promoted_windows + normal_promoted_windows
+        unlabeled_alert_pct = (unlabeled_alerts_count / total_alerts_across_eval * 100) if total_alerts_across_eval > 0 else 0.0
+        print(f"    Unlabeled Campus Background Flows: {unlabeled_flows_count:,} ({unlabeled_flow_pct:.2f}% of {total_eval_flows:,} total unique flows)")
+        print(f"    Unlabeled Background Window Slices: {unlabeled_records_count:,} ({unlabeled_records_count / (total_attack_records + total_normal_records + unlabeled_records_count) * 100:.2f}% of total windows)")
+        print(f"    Promoted Alerts on Unlabeled Flows: {unlabeled_alerts_count:,} ({unlabeled_alert_pct:.2f}% of {total_alerts_across_eval:,} total alerts)")
+        if unlabeled_alerts_count > 0:
+            for det_name, cnt in stats["botnet"]["unlabeled_promoted_alerts"].items():
+                flows_str = ", ".join(list(stats["botnet"]["unlabeled_unique_flows_alerted"][det_name]))
+                print(f"      - {det_name}: {cnt} alerts on flow: {flows_str}")
+        print("=" * 78)
+
+        print("\n  Per-Detector Detailed Breakdown (Reconciled Metrics):")
+        print(f"  {'DETECTOR':<24} | {'BOTNET PROMOTED':<16} | {'NORMAL FP':<10} | {'BOTNET FLOWS':<12} | {'NORMAL FP FLOWS':<15}")
+        print("  " + "-" * 88)
+        for d in self.detectors:
+            name = d.__class__.__name__
+            b_p = stats["botnet"]["promoted"][name]
+            n_p = stats["normal"]["promoted"][name]
+            b_f = len(stats["botnet"]["det_unique_attack_flows"][name])
+            n_f = len(stats["normal"]["det_unique_normal_flows"][name])
+            print(f"  {name:<24} | {b_p:<16} | {n_p:<10} | {b_f:<12} | {n_f:<15}")
+        print("  " + "-" * 88)
+
+        results = {
+            "total_attack_flows": total_attack_flows,
+            "detected_attack_flows_tp": tp_flows,
+            "missed_attack_flows_fn": fn_flows,
+            "recall": flow_recall,
+            "total_normal_flows": total_normal_flows,
+            "false_positive_flows": fp_flows,
+            "total_normal_alerts": normal_promoted_windows,
+            "false_positive_rate": flow_fpr,
+            "duration_hours": duration_hours,
+            "alerts_per_hour": alerts_per_hour,
+            "window_metrics": {
+                "attack_windows": total_attack_records,
+                "botnet_promoted_windows": botnet_promoted_windows,
+                "normal_windows": total_normal_records,
+                "normal_promoted_windows": normal_promoted_windows,
+            },
+            "unlabeled_accounting": {
+                "unlabeled_flows": unlabeled_flows_count,
+                "unlabeled_flow_pct": unlabeled_flow_pct,
+                "unlabeled_windows": unlabeled_records_count,
+                "unlabeled_alerts": unlabeled_alerts_count,
+                "unlabeled_alert_pct": unlabeled_alert_pct,
+            },
+            "per_detector": {
+                d.__class__.__name__: {
+                    "botnet_candidates": stats["botnet"]["candidates"][d.__class__.__name__],
+                    "botnet_promoted": stats["botnet"]["promoted"][d.__class__.__name__],
+                    "botnet_unique_flows": len(stats["botnet"]["det_unique_attack_flows"][d.__class__.__name__]),
+                    "normal_candidates": stats["normal"]["candidates"][d.__class__.__name__],
+                    "normal_promoted": stats["normal"]["promoted"][d.__class__.__name__],
+                    "normal_unique_flows": len(stats["normal"]["det_unique_normal_flows"][d.__class__.__name__]),
+                }
+                for d in self.detectors
+            },
+        }
+        return results
+
+
+def main():
+    botnet_pcap = os.path.join(BASE_DIR, "validation", "external_samples", "ctu13_neris_real_botnet_10k.pcap")
+    normal_pcap = os.path.join(BASE_DIR, "validation", "external_samples", "ctu13_real_normal.pcap")
+    botnet_cache = os.path.join(BASE_DIR, "scratch", "ctu_botnet.jsonl")
+    normal_cache = os.path.join(BASE_DIR, "scratch", "ctu_normal.jsonl")
+
+    evaluator = HoldoutEvaluator(required_windows=3, window_ttl_seconds=300)
+    evaluator.evaluate(botnet_pcap, normal_pcap, botnet_cache, normal_cache)
+
+
+if __name__ == "__main__":
+    main()

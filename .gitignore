@@ -1,0 +1,17 @@
+# Virtual Environment
+.venv/
+env/
+venv/
+
+# Python Cache
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+
+# Temporary JSONL output records and test scratch
+*.jsonl
+!docs/sample_alert_feed.jsonl
+!portscan_features.jsonl
+**/tests/scratch/
+diode_compliance_status.json

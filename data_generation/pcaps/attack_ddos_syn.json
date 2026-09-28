@@ -1,0 +1,10 @@
+{
+  "pcap_file": "attack_ddos_syn.pcap",
+  "threat_class": "a_volumetric_ddos",
+  "attack_type": "SYN_flood_spoofed_source",
+  "victim_ip": "192.168.1.100",
+  "victim_port": 80,
+  "total_packets": 1000,
+  "expected_entropy": ">4.0",
+  "expected_syn_ack_ratio": ">100.0"
+}

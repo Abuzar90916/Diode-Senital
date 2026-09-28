@@ -1,0 +1,13 @@
+Metric,Value,Unit
+Packets Processed,1000,packets
+Pure Pipeline Rate,4583.74,pkts/sec
+Wall-Clock Rate (inc. generator/IO),2753.61,pkts/sec
+Throughput Bandwidth,1.19,Mbps
+Flows Rate,1968.83,flows/sec
+P50 Latency,0.0589,ms
+P95 Latency,0.1505,ms
+P99 Latency,1.1351,ms
+P99.9 Latency,30.5437,ms
+Tail Clustering,RECURRING_PERIODIC,
+Memory Delta,10.59,MB
+SLA Status,PASSED,

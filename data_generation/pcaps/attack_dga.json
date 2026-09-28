@@ -1,0 +1,20 @@
+{
+  "pcap_file": "attack_dga.pcap",
+  "threat_class": "c_dga_dns_tunnel",
+  "dga_samples": [
+    "01yd3joavx8f2ps60s.biz",
+    "etejuupe35cr0xyl7a.biz",
+    "c7vmd22zgu63ly4x0b.biz",
+    "20nk1w3vtmlvedwnd5.biz",
+    "p4j47mn27rg9b3xkk3.biz"
+  ],
+  "tunnel_samples": [
+    "dnscat.de5bc26cdee4df4ead86b358aaa6b33b3876a3e9f97c102f.exfil-c2.net",
+    "dnscat.492d8e438e5be5ec15ea912afc11492752c5bf842023f24e.exfil-c2.net",
+    "dnscat.57c2d74d0010d1c76e6353d7b80466bdb9541c49957f339f.exfil-c2.net",
+    "dnscat.fda9fb9da05c936a2488c0aadc89220f24ef923d3d2917c1.exfil-c2.net",
+    "dnscat.b5b9536b38d1427689f6ef1ca36bb41f8da047e33e4d2dbe.exfil-c2.net"
+  ],
+  "expected_entropy": ">3.8",
+  "expected_tunnel_flag": true
+}

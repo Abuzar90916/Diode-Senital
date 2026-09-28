@@ -1,0 +1,10 @@
+{
+  "pcap_file": "attack_c2_beacon.pcap",
+  "threat_class": "b_c2_beaconing",
+  "bot_ip": "192.168.1.45",
+  "c2_ip": "45.33.32.156",
+  "interval_sec": 3.0,
+  "beacons_count": 40,
+  "expected_iat_cv": "<0.15",
+  "expected_periodicity_score": ">0.75"
+}

@@ -1,0 +1,10 @@
+{
+  "pcap_file": "benign_periodic_heartbeat.pcap",
+  "label": "benign",
+  "threat_class": "none",
+  "traffic_pattern": "periodic_heartbeats",
+  "description": "Legitimate NTP (123/UDP), agent health check (443/TCP), and OS auto-updater pings",
+  "total_packets": 128,
+  "duration_sec": 60.0,
+  "generated_at": "2026-09-04T13:14:33Z"
+}

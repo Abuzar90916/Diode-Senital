@@ -1,0 +1,8 @@
+{
+  "pcap_file": "benign_bursty.pcap",
+  "label": "benign",
+  "threat_class": "none",
+  "traffic_pattern": "bursty",
+  "total_packets": 783,
+  "generated_at": "2026-09-04T13:14:33Z"
+}

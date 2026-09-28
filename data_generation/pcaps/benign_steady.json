@@ -1,0 +1,411 @@
+{
+  "pcap_file": "benign_steady.pcap",
+  "label": "benign",
+  "threat_class": "none",
+  "total_packets": 450,
+  "duration_sec": 20.33,
+  "generated_at": "2026-09-04T13:14:32Z",
+  "sessions_count": 50,
+  "flows": [
+    {
+      "client": "192.168.10.5",
+      "server": "13.232.12.90",
+      "domain": "cloudflare.com",
+      "protocol": "TLS",
+      "tls_profile": "iot_agent",
+      "start_time": 1788527672.1278532
+    },
+    {
+      "client": "192.168.10.4",
+      "server": "142.250.190.46",
+      "domain": "github.com",
+      "protocol": "TLS",
+      "tls_profile": "curl_cli",
+      "start_time": 1788527672.2606237
+    },
+    {
+      "client": "192.168.10.5",
+      "server": "13.232.12.90",
+      "domain": "microsoft.com",
+      "protocol": "TLS",
+      "tls_profile": "python_requests",
+      "start_time": 1788527672.354432
+    },
+    {
+      "client": "192.168.10.4",
+      "server": "151.101.65.140",
+      "domain": "cloudflare.com",
+      "protocol": "TLS",
+      "tls_profile": "curl_cli",
+      "start_time": 1788527672.5394738
+    },
+    {
+      "client": "192.168.10.2",
+      "server": "151.101.65.140",
+      "domain": "youtube.com",
+      "protocol": "HTTP",
+      "tls_profile": "none",
+      "start_time": 1788527673.8372083
+    },
+    {
+      "client": "192.168.10.6",
+      "server": "151.101.65.140",
+      "domain": "amazon.in",
+      "protocol": "TLS",
+      "tls_profile": "browser",
+      "start_time": 1788527674.310846
+    },
+    {
+      "client": "192.168.10.6",
+      "server": "142.250.190.46",
+      "domain": "microsoft.com",
+      "protocol": "HTTP",
+      "tls_profile": "none",
+      "start_time": 1788527674.3878334
+    },
+    {
+      "client": "192.168.10.8",
+      "server": "13.232.12.90",
+      "domain": "amazon.in",
+      "protocol": "HTTP",
+      "tls_profile": "none",
+      "start_time": 1788527674.9866767
+    },
+    {
+      "client": "192.168.10.7",
+      "server": "13.232.12.90",
+      "domain": "amazon.in",
+      "protocol": "HTTP",
+      "tls_profile": "none",
+      "start_time": 1788527675.0757685
+    },
+    {
+      "client": "192.168.10.5",
+      "server": "13.232.12.90",
+      "domain": "github.com",
+      "protocol": "TLS",
+      "tls_profile": "python_requests",
+      "start_time": 1788527675.09645
+    },
+    {
+      "client": "192.168.10.6",
+      "server": "13.232.12.90",
+      "domain": "stackoverflow.com",
+      "protocol": "TLS",
+      "tls_profile": "curl_cli",
+      "start_time": 1788527675.4535325
+    },
+    {
+      "client": "192.168.10.8",
+      "server": "142.250.190.46",
+      "domain": "amazon.in",
+      "protocol": "TLS",
+      "tls_profile": "browser",
+      "start_time": 1788527675.5576637
+    },
+    {
+      "client": "192.168.10.9",
+      "server": "151.101.65.140",
+      "domain": "amazon.in",
+      "protocol": "HTTP",
+      "tls_profile": "none",
+      "start_time": 1788527675.7172472
+    },
+    {
+      "client": "192.168.10.6",
+      "server": "151.101.65.140",
+      "domain": "python.org",
+      "protocol": "TLS",
+      "tls_profile": "curl_cli",
+      "start_time": 1788527676.0628576
+    },
+    {
+      "client": "192.168.10.9",
+      "server": "151.101.65.140",
+      "domain": "google.com",
+      "protocol": "HTTP",
+      "tls_profile": "none",
+      "start_time": 1788527676.1302257
+    },
+    {
+      "client": "192.168.10.3",
+      "server": "151.101.65.140",
+      "domain": "github.com",
+      "protocol": "TLS",
+      "tls_profile": "curl_cli",
+      "start_time": 1788527676.5548604
+    },
+    {
+      "client": "192.168.10.2",
+      "server": "151.101.65.140",
+      "domain": "wikipedia.org",
+      "protocol": "TLS",
+      "tls_profile": "curl_cli",
+      "start_time": 1788527676.6431377
+    },
+    {
+      "client": "192.168.10.9",
+      "server": "142.250.190.46",
+      "domain": "cloudflare.com",
+      "protocol": "HTTP",
+      "tls_profile": "none",
+      "start_time": 1788527676.9925518
+    },
+    {
+      "client": "192.168.10.2",
+      "server": "142.250.190.46",
+      "domain": "ntro.gov.in",
+      "protocol": "TLS",
+      "tls_profile": "curl_cli",
+      "start_time": 1788527677.4230406
+    },
+    {
+      "client": "192.168.10.8",
+      "server": "142.250.190.46",
+      "domain": "amazon.in",
+      "protocol": "HTTP",
+      "tls_profile": "none",
+      "start_time": 1788527678.0204618
+    },
+    {
+      "client": "192.168.10.7",
+      "server": "13.232.12.90",
+      "domain": "github.com",
+      "protocol": "TLS",
+      "tls_profile": "browser",
+      "start_time": 1788527678.2391315
+    },
+    {
+      "client": "192.168.10.5",
+      "server": "151.101.65.140",
+      "domain": "cloudflare.com",
+      "protocol": "HTTP",
+      "tls_profile": "none",
+      "start_time": 1788527679.1227694
+    },
+    {
+      "client": "192.168.10.7",
+      "server": "151.101.65.140",
+      "domain": "cloudflare.com",
+      "protocol": "TLS",
+      "tls_profile": "browser",
+      "start_time": 1788527679.3250532
+    },
+    {
+      "client": "192.168.10.4",
+      "server": "13.232.12.90",
+      "domain": "wikipedia.org",
+      "protocol": "TLS",
+      "tls_profile": "iot_agent",
+      "start_time": 1788527679.8009524
+    },
+    {
+      "client": "192.168.10.6",
+      "server": "104.18.26.120",
+      "domain": "microsoft.com",
+      "protocol": "HTTP",
+      "tls_profile": "none",
+      "start_time": 1788527680.2235448
+    },
+    {
+      "client": "192.168.10.6",
+      "server": "151.101.65.140",
+      "domain": "python.org",
+      "protocol": "TLS",
+      "tls_profile": "browser",
+      "start_time": 1788527680.8638525
+    },
+    {
+      "client": "192.168.10.7",
+      "server": "104.18.26.120",
+      "domain": "python.org",
+      "protocol": "TLS",
+      "tls_profile": "iot_agent",
+      "start_time": 1788527681.4701698
+    },
+    {
+      "client": "192.168.10.7",
+      "server": "142.250.190.46",
+      "domain": "python.org",
+      "protocol": "HTTP",
+      "tls_profile": "none",
+      "start_time": 1788527681.5156627
+    },
+    {
+      "client": "192.168.10.4",
+      "server": "142.250.190.46",
+      "domain": "github.com",
+      "protocol": "HTTP",
+      "tls_profile": "none",
+      "start_time": 1788527682.2501917
+    },
+    {
+      "client": "192.168.10.4",
+      "server": "151.101.65.140",
+      "domain": "github.com",
+      "protocol": "TLS",
+      "tls_profile": "iot_agent",
+      "start_time": 1788527682.3658316
+    },
+    {
+      "client": "192.168.10.4",
+      "server": "151.101.65.140",
+      "domain": "microsoft.com",
+      "protocol": "HTTP",
+      "tls_profile": "none",
+      "start_time": 1788527682.8104432
+    },
+    {
+      "client": "192.168.10.6",
+      "server": "104.18.26.120",
+      "domain": "github.com",
+      "protocol": "TLS",
+      "tls_profile": "iot_agent",
+      "start_time": 1788527683.654293
+    },
+    {
+      "client": "192.168.10.8",
+      "server": "142.250.190.46",
+      "domain": "amazon.in",
+      "protocol": "HTTP",
+      "tls_profile": "none",
+      "start_time": 1788527683.716231
+    },
+    {
+      "client": "192.168.10.6",
+      "server": "151.101.65.140",
+      "domain": "stackoverflow.com",
+      "protocol": "TLS",
+      "tls_profile": "browser",
+      "start_time": 1788527685.2559605
+    },
+    {
+      "client": "192.168.10.6",
+      "server": "151.101.65.140",
+      "domain": "microsoft.com",
+      "protocol": "TLS",
+      "tls_profile": "curl_cli",
+      "start_time": 1788527685.7676094
+    },
+    {
+      "client": "192.168.10.9",
+      "server": "104.18.26.120",
+      "domain": "google.com",
+      "protocol": "HTTP",
+      "tls_profile": "none",
+      "start_time": 1788527685.9239657
+    },
+    {
+      "client": "192.168.10.4",
+      "server": "13.232.12.90",
+      "domain": "microsoft.com",
+      "protocol": "TLS",
+      "tls_profile": "curl_cli",
+      "start_time": 1788527685.9949906
+    },
+    {
+      "client": "192.168.10.7",
+      "server": "151.101.65.140",
+      "domain": "amazon.in",
+      "protocol": "TLS",
+      "tls_profile": "iot_agent",
+      "start_time": 1788527686.011674
+    },
+    {
+      "client": "192.168.10.8",
+      "server": "13.232.12.90",
+      "domain": "wikipedia.org",
+      "protocol": "HTTP",
+      "tls_profile": "none",
+      "start_time": 1788527686.1231773
+    },
+    {
+      "client": "192.168.10.2",
+      "server": "142.250.190.46",
+      "domain": "python.org",
+      "protocol": "TLS",
+      "tls_profile": "curl_cli",
+      "start_time": 1788527686.7865138
+    },
+    {
+      "client": "192.168.10.4",
+      "server": "13.232.12.90",
+      "domain": "google.com",
+      "protocol": "TLS",
+      "tls_profile": "python_requests",
+      "start_time": 1788527686.930511
+    },
+    {
+      "client": "192.168.10.9",
+      "server": "151.101.65.140",
+      "domain": "stackoverflow.com",
+      "protocol": "TLS",
+      "tls_profile": "curl_cli",
+      "start_time": 1788527687.7731042
+    },
+    {
+      "client": "192.168.10.5",
+      "server": "142.250.190.46",
+      "domain": "cloudflare.com",
+      "protocol": "HTTP",
+      "tls_profile": "none",
+      "start_time": 1788527688.0265098
+    },
+    {
+      "client": "192.168.10.6",
+      "server": "104.18.26.120",
+      "domain": "amazon.in",
+      "protocol": "TLS",
+      "tls_profile": "python_requests",
+      "start_time": 1788527688.1730208
+    },
+    {
+      "client": "192.168.10.5",
+      "server": "151.101.65.140",
+      "domain": "google.com",
+      "protocol": "TLS",
+      "tls_profile": "python_requests",
+      "start_time": 1788527688.2194912
+    },
+    {
+      "client": "192.168.10.9",
+      "server": "142.250.190.46",
+      "domain": "stackoverflow.com",
+      "protocol": "HTTP",
+      "tls_profile": "none",
+      "start_time": 1788527689.5705721
+    },
+    {
+      "client": "192.168.10.6",
+      "server": "142.250.190.46",
+      "domain": "google.com",
+      "protocol": "TLS",
+      "tls_profile": "curl_cli",
+      "start_time": 1788527690.0964456
+    },
+    {
+      "client": "192.168.10.5",
+      "server": "151.101.65.140",
+      "domain": "wikipedia.org",
+      "protocol": "HTTP",
+      "tls_profile": "none",
+      "start_time": 1788527691.4170918
+    },
+    {
+      "client": "192.168.10.9",
+      "server": "151.101.65.140",
+      "domain": "cloudflare.com",
+      "protocol": "TLS",
+      "tls_profile": "iot_agent",
+      "start_time": 1788527691.973903
+    },
+    {
+      "client": "192.168.10.4",
+      "server": "142.250.190.46",
+      "domain": "ntro.gov.in",
+      "protocol": "TLS",
+      "tls_profile": "browser",
+      "start_time": 1788527692.058705
+    }
+  ]
+}

@@ -1,17 +1,5 @@
-# Core Ingestion, Feature Pipeline, and Compliance
-scapy>=2.5.0
-pydantic>=2.0.0
-psutil>=5.9.0
-
-# Detection Engine, Machine Learning, and Evaluation
-numpy>=1.24.0
-scikit-learn>=1.3.0
-xgboost>=2.0.0
-joblib>=1.3.0
-
-# Web Dashboard & API
+# Vercel Production & SOC Dashboard Web Runtime
 fastapi>=0.100.0
 uvicorn>=0.20.0
-
-# Testing and Verification
-pytest>=7.4.0
+pydantic>=2.0.0
+psutil>=5.9.0

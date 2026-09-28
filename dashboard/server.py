@@ -13,7 +13,6 @@ from fastapi.responses import HTMLResponse, StreamingResponse, JSONResponse, Fil
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
-from run_pipeline import run_pipeline
 
 BASE_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 
@@ -130,6 +129,12 @@ class RuntimeController:
 
         def worker():
             try:
+                try:
+                    from run_pipeline import run_pipeline
+                except ImportError as imp_err:
+                    raise RuntimeError(
+                        f"Live capture & threat detection pipeline requires ML dependencies: {imp_err}"
+                    )
                 self.last_summary = run_pipeline(
                     pcap_path=pcap,
                     interface=interface,

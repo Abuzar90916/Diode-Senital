@@ -1,0 +1,12 @@
+# Full Offline Threat Detection Engine, ML Models, and Local Verification
+-r requirements.txt
+
+# Heavy Machine Learning & Offline Ingestion Engines
+numpy>=1.24.0
+scikit-learn>=1.3.0
+xgboost>=2.0.0
+joblib>=1.3.0
+scapy>=2.5.0
+
+# Testing and Verification
+pytest>=7.4.0

@@ -9,5 +9,9 @@ scikit-learn>=1.3.0
 xgboost>=2.0.0
 joblib>=1.3.0
 
+# Web Dashboard & API
+fastapi>=0.100.0
+uvicorn>=0.20.0
+
 # Testing and Verification
 pytest>=7.4.0

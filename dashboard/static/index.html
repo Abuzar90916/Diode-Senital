@@ -28,8 +28,75 @@
 <body>
   <div class="app-layout">
     
+    <!-- Collapsible Sidebar Backdrop Overlay -->
+    <div class="sidebar-backdrop" id="sidebarBackdrop" aria-hidden="true"></div>
+
+    <!-- Collapsed Navigation Rail (Fixed Viewport Anchor) -->
+    <aside class="desktop-rail" id="desktopRail" aria-label="Quick Navigation Rail">
+      <div class="rail-top">
+        <button class="rail-btn-toggle" id="btnRailToggle" aria-label="Open navigation" title="Expand Navigation (Menu)">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+            <line x1="3" y1="12" x2="21" y2="12"/>
+            <line x1="3" y1="6" x2="21" y2="6"/>
+            <line x1="3" y1="18" x2="21" y2="18"/>
+          </svg>
+        </button>
+        <a href="/dashboard/overview" class="rail-brand-icon" data-route="/dashboard/overview" title="Diode Sentinel Home">
+          <div class="diode-shield-mark sm">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
+              <path d="M12 8v8"/>
+              <path d="M8 12h8"/>
+            </svg>
+          </div>
+        </a>
+      </div>
+
+      <nav class="rail-nav">
+        <a href="/dashboard/overview" class="rail-nav-item active" data-route="/dashboard/overview" id="rail-nav-overview" title="Overview">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg>
+        </a>
+
+        <a href="/dashboard/threats" class="rail-nav-item" data-route="/dashboard/threats" id="rail-nav-threats" title="Live Threats">
+          <div class="rail-icon-wrapper">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+            <span class="rail-counter-dot" id="railThreatDot" style="display:none;"></span>
+          </div>
+        </a>
+
+        <a href="/dashboard/incidents" class="rail-nav-item" data-route="/dashboard/incidents" id="rail-nav-incidents" title="Attack Chains">
+          <div class="rail-icon-wrapper">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="18" cy="18" r="3"/><circle cx="6" cy="6" r="3"/><path d="M18 6v6a6 6 0 0 1-6 6H6"/></svg>
+            <span class="rail-counter-dot" id="railIncidentDot" style="display:none;"></span>
+          </div>
+        </a>
+
+        <a href="/dashboard/flows" class="rail-nav-item" data-route="/dashboard/flows" id="rail-nav-flows" title="Network Flows">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
+        </a>
+
+        <a href="/dashboard/engine" class="rail-nav-item" data-route="/dashboard/engine" id="rail-nav-engine" title="Model Engine">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2a4 4 0 0 0-4 4v1a4 4 0 0 0 8 0V6a4 4 0 0 0-4-4Z"/><path d="M18 9v1a6 6 0 0 1-12 0V9"/><circle cx="12" cy="19" r="2"/><line x1="12" y1="16" x2="12" y2="17"/></svg>
+        </a>
+
+        <a href="/dashboard/demo" class="rail-nav-item" data-route="/dashboard/demo" id="rail-nav-demo" title="Demo Testing">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+        </a>
+
+        <a href="/dashboard/system" class="rail-nav-item" data-route="/dashboard/system" id="rail-nav-system" title="System & Diode">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="2" width="20" height="8" rx="2" ry="2"/><rect x="2" y="14" width="20" height="8" rx="2" ry="2"/><line x1="6" y1="6" x2="6.01" y2="6"/><line x1="6" y1="18" x2="6.01" y2="18"/></svg>
+        </a>
+      </nav>
+
+      <div class="rail-footer">
+        <div class="rail-status-dot" title="Diode Watchdog: Strict Physical RX Only">
+          <span class="pulse-indicator emerald sm"></span>
+        </div>
+      </div>
+    </aside>
+
     <!-- ====================================================================
-         1. DESKTOP SIDEBAR (Visible >= 1024px)
+         1. COLLAPSIBLE SIDEBAR DRAWER (Overlay on Demand)
          ==================================================================== -->
     <aside class="desktop-sidebar" id="desktopSidebar">
       <div class="sidebar-top">
@@ -46,6 +113,12 @@
             <div class="brand-sub">Unidirectional Passive SOC</div>
           </div>
         </a>
+        <button class="btn-sidebar-close" id="btnCloseSidebar" aria-label="Close navigation" title="Close navigation (Esc)">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+            <line x1="18" y1="6" x2="6" y2="18"></line>
+            <line x1="6" y1="6" x2="18" y2="18"></line>
+          </svg>
+        </button>
       </div>
 
       <!-- Navigation items -->
@@ -1090,7 +1163,12 @@
           <span class="modal-badge rose" id="mAlertSeverity">CRITICAL</span>
           <h3 class="modal-title" id="mAlertTitle">Alert Forensic Breakdown</h3>
         </div>
-        <button class="btn-modal-close" id="btnCloseAlertModal">&times;</button>
+        <button class="btn-modal-close" id="btnCloseAlertModal" aria-label="Close alert forensic breakdown" title="Close alert details (Esc)">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+            <line x1="18" y1="6" x2="6" y2="18"></line>
+            <line x1="6" y1="6" x2="18" y2="18"></line>
+          </svg>
+        </button>
       </div>
       <div class="modal-body" id="mAlertBody">
         <!-- Content inserted dynamically -->
@@ -1109,7 +1187,12 @@
           <span class="modal-badge blue">FLOW RECORD</span>
           <h3 class="modal-title" id="mFlowTitle">6-Domain Feature Vector</h3>
         </div>
-        <button class="btn-modal-close" id="btnCloseFlowModal">&times;</button>
+        <button class="btn-modal-close" id="btnCloseFlowModal" aria-label="Close flow details" title="Close flow details (Esc)">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+            <line x1="18" y1="6" x2="6" y2="18"></line>
+            <line x1="6" y1="6" x2="18" y2="18"></line>
+          </svg>
+        </button>
       </div>
       <div class="modal-body" id="mFlowBody">
         <!-- Content inserted dynamically -->
@@ -1128,7 +1211,12 @@
           <span class="modal-badge emerald">NTRO CERTIFIED</span>
           <h3 class="modal-title">Hardware Diode Non-Repudiation Audit Ledger</h3>
         </div>
-        <button class="btn-modal-close" id="btnCloseValidation">&times;</button>
+        <button class="btn-modal-close" id="btnCloseValidation" aria-label="Close audit ledger" title="Close audit ledger (Esc)">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+            <line x1="18" y1="6" x2="6" y2="18"></line>
+            <line x1="6" y1="6" x2="18" y2="18"></line>
+          </svg>
+        </button>
       </div>
       <div class="modal-body" id="validationModalBody">
         <div class="audit-cert-box">

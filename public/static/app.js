@@ -193,6 +193,11 @@ class DiodeSentinelApp {
       item.classList.toggle('active', item.dataset.route === route);
     });
 
+    // Update active nav state in desktop rail
+    document.querySelectorAll('.desktop-rail .rail-nav-item').forEach(item => {
+      item.classList.toggle('active', item.dataset.route === route);
+    });
+
     // Update active nav state in mobile bottom bar
     document.querySelectorAll('.mobile-bottom-nav .bottom-nav-item').forEach(item => {
       if (item.dataset.route) {
@@ -203,7 +208,8 @@ class DiodeSentinelApp {
     // Update topbar breadcrumbs & page titles
     this.updateTopbarTitles(route);
 
-    // Close mobile drawer if open
+    // Close collapsible sidebar and mobile drawer if open
+    this.closeSidebar();
     this.closeMobileDrawer();
 
     // Trigger page-specific data refresh
@@ -259,6 +265,15 @@ class DiodeSentinelApp {
      2. ELEMENT INITIALIZATION & EVENT LISTENERS
      ======================================================================== */
   initElements() {
+    // Collapsible Sidebar & Rail controls
+    this.desktopSidebar = document.getElementById('desktopSidebar');
+    this.desktopRail = document.getElementById('desktopRail');
+    this.sidebarBackdrop = document.getElementById('sidebarBackdrop');
+    this.btnRailToggle = document.getElementById('btnRailToggle');
+    this.btnCloseSidebar = document.getElementById('btnCloseSidebar');
+    this.railThreatDot = document.getElementById('railThreatDot');
+    this.railIncidentDot = document.getElementById('railIncidentDot');
+
     // Mobile navigation controls
     this.btnMobileMenuToggle = document.getElementById('btnMobileMenuToggle');
     this.btnMobileMore = document.getElementById('btnMobileMore');
@@ -310,9 +325,18 @@ class DiodeSentinelApp {
       }
     });
 
-    // Mobile drawer toggle
+    // Collapsible Sidebar toggle & close
+    if (this.btnRailToggle) {
+      this.btnRailToggle.addEventListener('click', () => this.toggleSidebar());
+    }
+    if (this.btnCloseSidebar) {
+      this.btnCloseSidebar.addEventListener('click', () => this.closeSidebar());
+    }
+    if (this.sidebarBackdrop) {
+      this.sidebarBackdrop.addEventListener('click', () => this.closeSidebar());
+    }
     if (this.btnMobileMenuToggle) {
-      this.btnMobileMenuToggle.addEventListener('click', () => this.toggleMobileDrawer());
+      this.btnMobileMenuToggle.addEventListener('click', () => this.toggleSidebar());
     }
     if (this.btnMobileMore) {
       this.btnMobileMore.addEventListener('click', () => this.toggleMobileDrawer());
@@ -375,6 +399,15 @@ class DiodeSentinelApp {
       this.btnDismissFlowModal.addEventListener('click', () => this.closeModal(this.flowDetailModal));
     }
 
+    // Dismiss modals when clicking directly on the backdrop (outside modal-sheet)
+    document.querySelectorAll('.modal-backdrop').forEach(backdrop => {
+      backdrop.addEventListener('click', (e) => {
+        if (e.target === backdrop) {
+          this.closeModal(backdrop);
+        }
+      });
+    });
+
     // Watchdog baseline reset
     if (this.btnResetWatchdog) {
       this.btnResetWatchdog.addEventListener('click', () => this.resetWatchdog());
@@ -393,13 +426,33 @@ class DiodeSentinelApp {
       }
     });
 
-    // Close modals on Escape key
+    // Close modals and sidebar on Escape key
     window.addEventListener('keydown', (e) => {
       if (e.key === 'Escape') {
         this.closeAllModals();
         this.closeMobileDrawer();
+        this.closeSidebar();
       }
     });
+  }
+
+  toggleSidebar() {
+    const isOpen = this.desktopSidebar && this.desktopSidebar.classList.contains('open');
+    if (isOpen) {
+      this.closeSidebar();
+    } else {
+      this.openSidebar();
+    }
+  }
+
+  openSidebar() {
+    if (this.desktopSidebar) this.desktopSidebar.classList.add('open');
+    if (this.sidebarBackdrop) this.sidebarBackdrop.classList.add('open');
+  }
+
+  closeSidebar() {
+    if (this.desktopSidebar) this.desktopSidebar.classList.remove('open');
+    if (this.sidebarBackdrop) this.sidebarBackdrop.classList.remove('open');
   }
 
   toggleMobileDrawer() {
@@ -422,15 +475,25 @@ class DiodeSentinelApp {
   }
 
   openModal(modal) {
-    if (modal) modal.classList.add('open');
+    if (modal) {
+      modal.classList.add('open');
+      document.body.style.overflow = 'hidden';
+    }
   }
 
   closeModal(modal) {
-    if (modal) modal.classList.remove('open');
+    if (modal) {
+      modal.classList.remove('open');
+      const anyOpen = document.querySelector('.modal-backdrop.open');
+      if (!anyOpen) {
+        document.body.style.overflow = '';
+      }
+    }
   }
 
   closeAllModals() {
     document.querySelectorAll('.modal-backdrop').forEach(m => m.classList.remove('open'));
+    document.body.style.overflow = '';
   }
 
   /* ========================================================================
@@ -745,6 +808,17 @@ class DiodeSentinelApp {
     if (sbIncEl) {
       sbIncEl.textContent = incidentCount;
       sbIncEl.style.display = incidentCount > 0 ? 'inline-block' : 'none';
+    }
+
+    // Desktop rail indicator dots
+    const railThreatDot = document.getElementById('railThreatDot');
+    if (railThreatDot) {
+      railThreatDot.style.display = threatCount > 0 ? 'block' : 'none';
+    }
+
+    const railIncDot = document.getElementById('railIncidentDot');
+    if (railIncDot) {
+      railIncDot.style.display = incidentCount > 0 ? 'block' : 'none';
     }
 
     // Mobile bottom nav counters

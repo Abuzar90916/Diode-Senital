@@ -126,18 +126,19 @@ class RuntimeController:
         self.thread: Optional[threading.Thread] = None
         self.running = False
         self.session_id: Optional[str] = None
-        self.source: str = "IDLE"  # "DEMO", "LIVE", "IDLE"
+        self.source: str = "IDLE"  # "DEMO", "LIVE", "BACKEND_TEST", "IDLE"
         self.active_pcap: Optional[str] = None
         self.active_interface: Optional[str] = None
         self.stop_event: Optional[threading.Event] = None
         self.last_error: Optional[str] = None
         self.last_summary: Dict[str, Any] = {}
         self.last_demo_result: Optional[Dict[str, Any]] = None
+        self.last_backend_test_result: Optional[Dict[str, Any]] = None
         self.lock = threading.Lock()
 
     def _publish(self, event: Dict[str, Any]) -> None:
         with self.lock:
-            # Stamp session_id and source to ensure strict Live vs Demo isolation
+            # Stamp session_id and source to ensure strict Live vs Demo vs Backend-Test isolation
             if "data" in event and isinstance(event["data"], dict):
                 event["data"]["session_id"] = self.session_id
                 event["data"]["source"] = self.source
@@ -145,7 +146,7 @@ class RuntimeController:
             self.events = self.events[-2000:]
         self.event_queue.put(event)
 
-    def start(self, pcap: Optional[str] = None, interface: Optional[str] = None) -> Dict[str, Any]:
+    def start(self, pcap: Optional[str] = None, interface: Optional[str] = None, source: Optional[str] = None) -> Dict[str, Any]:
         with self.lock:
             if self.running:
                 return self.status()
@@ -164,7 +165,13 @@ class RuntimeController:
             self.last_error = None
             self.last_summary = {}
             self.stop_event = threading.Event()
-            if resolved_pcap:
+            
+            if source == "BACKEND_TEST":
+                self.source = "BACKEND_TEST"
+                self.session_id = f"TEST-{uuid.uuid4().hex[:8].upper()}"
+                self.active_pcap = resolved_pcap
+                self.active_interface = None
+            elif resolved_pcap:
                 self.source = "DEMO"
                 self.session_id = f"DEMO-{uuid.uuid4().hex[:8].upper()}"
                 self.active_pcap = resolved_pcap
@@ -212,10 +219,23 @@ class RuntimeController:
                             "error": self.last_error,
                             "completed_at": datetime.now(timezone.utc).isoformat(),
                         }
+                    elif self.source == "BACKEND_TEST":
+                        self.last_backend_test_result = {
+                            "session_id": self.session_id,
+                            "pcap": self.active_pcap,
+                            "summary": dict(self.last_summary or {}),
+                            "error": self.last_error,
+                            "completed_at": datetime.now(timezone.utc).isoformat(),
+                        }
                 if self.source == "DEMO" and self.last_demo_result:
                     self._publish({
                         "type": "DEMO_COMPLETED",
                         "data": dict(self.last_demo_result),
+                    })
+                elif self.source == "BACKEND_TEST" and self.last_backend_test_result:
+                    self._publish({
+                        "type": "BACKEND_TEST_COMPLETED",
+                        "data": dict(self.last_backend_test_result),
                     })
 
         self.thread = threading.Thread(target=worker, daemon=True, name="diode-sentinel-runtime")
@@ -237,13 +257,47 @@ class RuntimeController:
     def status(self) -> Dict[str, Any]:
         with self.lock:
             summary = self.last_summary
-            if not summary and self.last_demo_result:
-                summary = self.last_demo_result.get("summary", {})
-            active_pcap = self.active_pcap or (self.last_demo_result.get("pcap") if self.last_demo_result else None)
-            session_id = self.session_id or (self.last_demo_result.get("session_id") if self.last_demo_result else None)
+            if not summary:
+                if self.source == "BACKEND_TEST" and self.last_backend_test_result:
+                    summary = self.last_backend_test_result.get("summary", {})
+                elif self.source == "DEMO" and self.last_demo_result:
+                    summary = self.last_demo_result.get("summary", {})
+                elif self.last_backend_test_result:
+                    summary = self.last_backend_test_result.get("summary", {})
+                elif self.last_demo_result:
+                    summary = self.last_demo_result.get("summary", {})
+
+            active_pcap = self.active_pcap
+            if not active_pcap:
+                if self.source == "BACKEND_TEST" and self.last_backend_test_result:
+                    active_pcap = self.last_backend_test_result.get("pcap")
+                elif self.source == "DEMO" and self.last_demo_result:
+                    active_pcap = self.last_demo_result.get("pcap")
+                elif self.last_backend_test_result:
+                    active_pcap = self.last_backend_test_result.get("pcap")
+                elif self.last_demo_result:
+                    active_pcap = self.last_demo_result.get("pcap")
+
+            session_id = self.session_id
+            if not session_id:
+                if self.source == "BACKEND_TEST" and self.last_backend_test_result:
+                    session_id = self.last_backend_test_result.get("session_id")
+                elif self.source == "DEMO" and self.last_demo_result:
+                    session_id = self.last_demo_result.get("session_id")
+                elif self.last_backend_test_result:
+                    session_id = self.last_backend_test_result.get("session_id")
+                elif self.last_demo_result:
+                    session_id = self.last_demo_result.get("session_id")
+
+            mode = (
+                "live" if self.source == "LIVE"
+                else ("backend_test" if self.source == "BACKEND_TEST"
+                else ("demo" if self.source == "DEMO"
+                else "idle"))
+            )
 
             return {
-                "mode": "live" if self.source == "LIVE" else ("demo" if self.source == "DEMO" else "idle"),
+                "mode": mode,
                 "source": self.source,
                 "session_id": session_id,
                 "active_pcap": active_pcap,
@@ -254,6 +308,7 @@ class RuntimeController:
                 "last_error": self.last_error,
                 "summary": summary,
                 "last_demo_result": self.last_demo_result,
+                "last_backend_test_result": self.last_backend_test_result,
             }
 
     def snapshot(self, event_type: Optional[str] = None) -> List[Dict[str, Any]]:
@@ -274,6 +329,12 @@ class ControlRequest(BaseModel):
 class RuntimeStartRequest(BaseModel):
     pcap: Optional[str] = None
     interface: Optional[str] = None
+    source: Optional[str] = None
+    mode: Optional[str] = None
+
+
+class BackendTestStartRequest(BaseModel):
+    pcap: Optional[str] = "data_generation/pcaps/attack_portscan.pcap"
 
 # --- API Endpoints ---
 
@@ -318,9 +379,64 @@ async def get_replay_status():
 @app.post("/api/runtime/start")
 async def start_runtime(req: RuntimeStartRequest):
     try:
-        return runtime_controller.start(pcap=req.pcap, interface=req.interface)
+        src = req.source
+        if not src and req.mode:
+            src = "BACKEND_TEST" if req.mode.lower() == "backend_test" else ("DEMO" if req.mode.lower() == "demo" else "LIVE")
+        return runtime_controller.start(pcap=req.pcap, interface=req.interface, source=src)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
+
+
+@app.post("/api/backend-test/start")
+async def start_backend_test(req: BackendTestStartRequest):
+    """
+    Executes a real attack PCAP through the real pipeline directly on the deployed backend
+    with source=BACKEND_TEST and full watchdog enforcement.
+    """
+    try:
+        st = runtime_controller.start(pcap=req.pcap, source="BACKEND_TEST")
+        return {
+            "mode": "backend_test",
+            "source": "BACKEND_TEST",
+            "session_id": st.get("session_id"),
+            "pcap": st.get("pcap") or req.pcap,
+            "running": st.get("running", True),
+        }
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+
+@app.get("/api/backend-test/status")
+async def get_backend_test_status():
+    """
+    Returns active or completed status of the backend test execution.
+    """
+    st = runtime_controller.status()
+    summary = st.get("summary") or {}
+    if not summary and st.get("last_backend_test_result"):
+        summary = st["last_backend_test_result"].get("summary", {})
+    return {
+        "mode": st.get("mode"),
+        "source": st.get("source"),
+        "session_id": st.get("session_id"),
+        "pcap": st.get("pcap"),
+        "running": st.get("running"),
+        "events_buffered": st.get("events_buffered"),
+        "last_error": st.get("last_error"),
+        "summary": summary,
+        "last_backend_test_result": st.get("last_backend_test_result"),
+    }
+
+
+@app.get("/api/backend-test/last_result")
+async def get_last_backend_test_result():
+    """
+    Returns the most recent completed Backend Test execution result.
+    """
+    res = runtime_controller.last_backend_test_result
+    if res is None:
+        return {"status": "none", "last_backend_test_result": None}
+    return {"status": "available", "last_backend_test_result": res}
 
 
 @app.post("/api/runtime/stop")

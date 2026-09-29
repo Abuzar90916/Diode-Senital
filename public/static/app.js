@@ -89,17 +89,20 @@ class DiodeSentinelApp {
     this.apiConnected = false;
     this.sseConnected = false;
     this.runtimeMode = 'idle';
-    this.runtimeSource = null; // 'LIVE', 'DEMO', or null
+    this.runtimeSource = null; // 'LIVE', 'DEMO', 'BACKEND_TEST', or null
     this.runtimeSessionId = null;
 
     // UI Filters & Paging
     this.activeThreatFilter = 'ALL';
     this.activeTimeWindow = '1H';
     this.isDemoRunning = false;
+    this.isBackendTestRunning = false;
     this.isLiveRunning = false;
     this.demoPollingTimer = null;
+    this.backendTestPollingTimer = null;
     this.eventSource = null;
     this.lastCompletedDemo = null;
+    this.lastCompletedBackendTest = null;
 
     // Initialize application
     this.initElements();
@@ -242,6 +245,7 @@ class DiodeSentinelApp {
       this.loadLastDemoResult();
     } else if (route === '/dashboard/system') {
       this.loadComplianceAudit();
+      this.loadLastBackendTestResult();
     } else if (route === '/dashboard/overview') {
       this.renderOverview();
     } else if (route === '/dashboard/threats') {
@@ -283,6 +287,17 @@ class DiodeSentinelApp {
     this.btnDismissFlowModal = document.getElementById('btnDismissFlowModal');
     this.btnOpenAuditModal = document.getElementById('btnOpenAuditModal');
     this.btnResetWatchdog = document.getElementById('btnResetWatchdog');
+
+    // Backend Test Controls
+    this.btnRunBackendTest = document.getElementById('btnRunBackendTest');
+    this.backendTestScenarioSelect = document.getElementById('backendTestScenarioSelect');
+    this.backendTestPill = document.getElementById('backendTestPill');
+    this.backendTestSessionId = document.getElementById('backendTestSessionId');
+    this.backendTestPackets = document.getElementById('backendTestPackets');
+    this.backendTestFlows = document.getElementById('backendTestFlows');
+    this.backendTestAlerts = document.getElementById('backendTestAlerts');
+    this.backendTestElapsed = document.getElementById('backendTestElapsed');
+    this.backendTestActionMsg = document.getElementById('backendTestActionMsg');
   }
 
   initEventListeners() {
@@ -363,6 +378,11 @@ class DiodeSentinelApp {
     // Watchdog baseline reset
     if (this.btnResetWatchdog) {
       this.btnResetWatchdog.addEventListener('click', () => this.resetWatchdog());
+    }
+
+    // Backend Test RUN button
+    if (this.btnRunBackendTest) {
+      this.btnRunBackendTest.addEventListener('click', () => this.runBackendTest());
     }
 
     // Scenario RUN TEST buttons
@@ -513,6 +533,20 @@ class DiodeSentinelApp {
         }
       });
 
+      this.eventSource.addEventListener('backend_test_completed', (e) => {
+        try {
+          const data = JSON.parse(e.data);
+          if (data) {
+            this.lastCompletedBackendTest = data;
+            if (!this.isBackendTestRunning) {
+              this.renderBackendTestResult(this.lastCompletedBackendTest);
+            }
+          }
+        } catch (err) {
+          console.warn('SSE backend_test_completed parse error:', err);
+        }
+      });
+
       this.eventSource.addEventListener('error', () => {
         this.sseConnected = false;
         this.updateConnectionStatus();
@@ -529,9 +563,13 @@ class DiodeSentinelApp {
     let mobText = 'OFFLINE';
 
     const isRunning = Boolean(
-      (this.runtimeStatus && this.runtimeStatus.running) ||
+      (this.runtimeStatus && this.runtimeStatus.running && this.runtimeSource === 'LIVE') ||
       this.isLiveRunning ||
       this.runtimeSource === 'LIVE'
+    );
+    const isBackendTest = Boolean(
+      this.isBackendTestRunning ||
+      this.runtimeSource === 'BACKEND_TEST'
     );
     const isDemo = Boolean(
       this.isDemoRunning ||
@@ -552,6 +590,10 @@ class DiodeSentinelApp {
         modeText = 'CONNECTED / LIVE';
         pillClass = 'emerald';
         mobText = 'LIVE';
+      } else if (isBackendTest) {
+        modeText = 'CONNECTED / BACKEND TEST';
+        pillClass = 'purple';
+        mobText = 'TEST';
       } else if (isDemo) {
         modeText = 'CONNECTED / DEMO SESSION';
         pillClass = 'blue';
@@ -601,6 +643,8 @@ class DiodeSentinelApp {
         const mode = (this.runtimeStatus.mode || '').toUpperCase();
         if (isRunning) {
           opModeEl.textContent = 'LIVE PROMISCUOUS MONITORING';
+        } else if (isBackendTest) {
+          opModeEl.textContent = 'BACKEND SOC VERIFICATION EXECUTION';
         } else if (isDemo) {
           opModeEl.textContent = 'DEMO PCAP REPLAY';
         } else if (mode === 'IDLE' || this.runtimeStatus.source === 'IDLE') {
@@ -614,16 +658,40 @@ class DiodeSentinelApp {
     }
   }
 
+  getDashboardAlerts() {
+    return this.alerts.filter(a =>
+      a.source === 'LIVE' ||
+      a.source === 'BACKEND_TEST' ||
+      (a.session_id && (a.session_id.startsWith('LIVE-') || a.session_id.startsWith('TEST-')))
+    );
+  }
+
   getLiveAlerts() {
-    return this.alerts.filter(a => a.source === 'LIVE' || (a.session_id && a.session_id.startsWith('LIVE-')));
+    return this.getDashboardAlerts();
+  }
+
+  getBackendTestAlerts() {
+    return this.alerts.filter(a => a.source === 'BACKEND_TEST' || (a.session_id && a.session_id.startsWith('TEST-')));
   }
 
   getDemoAlerts() {
     return this.alerts.filter(a => a.source === 'DEMO' || (a.session_id && a.session_id.startsWith('DEMO-')));
   }
 
+  getDashboardIncidents() {
+    return this.incidents.filter(i =>
+      i.source === 'LIVE' ||
+      i.source === 'BACKEND_TEST' ||
+      (i.session_id && (i.session_id.startsWith('LIVE-') || i.session_id.startsWith('TEST-')))
+    );
+  }
+
   getLiveIncidents() {
-    return this.incidents.filter(i => i.source === 'LIVE' || (i.session_id && i.session_id.startsWith('LIVE-')));
+    return this.getDashboardIncidents();
+  }
+
+  getBackendTestIncidents() {
+    return this.incidents.filter(i => i.source === 'BACKEND_TEST' || (i.session_id && i.session_id.startsWith('TEST-')));
   }
 
   getDemoIncidents() {
@@ -1169,6 +1237,189 @@ class DiodeSentinelApp {
     }
   }
 
+  async runBackendTest() {
+    if (this.isBackendTestRunning) return;
+    this.isBackendTestRunning = true;
+
+    const selectEl = this.backendTestScenarioSelect;
+    const pcapPath = selectEl ? selectEl.value : 'data_generation/pcaps/attack_portscan.pcap';
+    const pcapBase = pcapPath.split(/[\\/]/).pop();
+
+    const btn = this.btnRunBackendTest;
+    if (btn) {
+      btn.disabled = true;
+      btn.innerHTML = '<span class="pulse-indicator purple"></span> RUNNING BACKEND TEST...';
+    }
+
+    const pill = this.backendTestPill;
+    if (pill) {
+      pill.textContent = 'RUNNING';
+      pill.className = 'compliance-pill purple';
+    }
+
+    const sessionEl = this.backendTestSessionId;
+    if (sessionEl) sessionEl.textContent = 'TEST-INITIALIZING...';
+
+    const pParsed = this.backendTestPackets;
+    if (pParsed) pParsed.textContent = '0';
+    const fEmitted = this.backendTestFlows;
+    if (fEmitted) fEmitted.textContent = '0';
+    const aEmitted = this.backendTestAlerts;
+    if (aEmitted) aEmitted.textContent = '0';
+    const eTime = this.backendTestElapsed;
+    if (eTime) eTime.textContent = '0.0s';
+
+    const msg = this.backendTestActionMsg;
+    if (msg) {
+      msg.textContent = `Executing "${pcapBase}" directly on deployed backend. Alerts stream to SOC Overview & Live Threats...`;
+    }
+
+    try {
+      const res = await fetch(this.apiUrl('/api/backend-test/start'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ pcap: pcapPath })
+      });
+
+      const startData = await res.json();
+      if (startData && startData.session_id) {
+        this.runtimeSessionId = startData.session_id;
+        if (sessionEl) sessionEl.textContent = startData.session_id;
+      }
+
+      if (this.backendTestPollingTimer) clearInterval(this.backendTestPollingTimer);
+
+      this.backendTestPollingTimer = setInterval(async () => {
+        try {
+          const stRes = await fetch(this.apiUrl('/api/backend-test/status'));
+          if (stRes.ok) {
+            const st = await stRes.json();
+            if (st.session_id && sessionEl) sessionEl.textContent = st.session_id;
+
+            const currentSummary = st.summary || (st.last_backend_test_result ? st.last_backend_test_result.summary : {});
+            if (pParsed && currentSummary.packets !== undefined) pParsed.textContent = currentSummary.packets.toLocaleString();
+            if (fEmitted && currentSummary.records !== undefined) fEmitted.textContent = currentSummary.records.toLocaleString();
+            if (aEmitted && currentSummary.alerts !== undefined) aEmitted.textContent = currentSummary.alerts.toLocaleString();
+            if (eTime && currentSummary.elapsed_sec !== undefined) eTime.textContent = `${currentSummary.elapsed_sec.toFixed(1)}s`;
+
+            if (!st.running) {
+              clearInterval(this.backendTestPollingTimer);
+              this.isBackendTestRunning = false;
+              if (btn) {
+                btn.disabled = false;
+                btn.innerHTML = '<span>⚡</span> RUN BACKEND TEST';
+              }
+
+              const err = st.last_error || (st.last_backend_test_result ? st.last_backend_test_result.error : null);
+              const finalSummary = (st.summary && st.summary.packets !== undefined)
+                ? st.summary
+                : (st.last_backend_test_result ? st.last_backend_test_result.summary : currentSummary);
+
+              if (err) {
+                if (pill) {
+                  pill.textContent = 'ERROR';
+                  pill.className = 'compliance-pill rose';
+                }
+                if (msg) msg.textContent = 'Backend test execution failed: ' + err;
+              } else {
+                if (pill) {
+                  pill.textContent = 'COMPLETED';
+                  pill.className = 'compliance-pill emerald';
+                }
+                if (msg) {
+                  const pkts = finalSummary.packets || 0;
+                  const flows = finalSummary.records || 0;
+                  const alts = finalSummary.alerts || 0;
+                  const el = (finalSummary.elapsed_sec || 0).toFixed(1);
+                  msg.textContent = `Scenario "${pcapBase}" complete: ${pkts.toLocaleString()} pkts -> ${flows.toLocaleString()} flows -> ${alts.toLocaleString()} promoted alerts in ${el}s.`;
+                }
+                this.lastCompletedBackendTest = {
+                  session_id: st.session_id || this.runtimeSessionId || 'TEST-COMPLETE',
+                  pcap: pcapPath,
+                  summary: finalSummary,
+                  error: null
+                };
+              }
+
+              // Refresh live alerts, incidents, flows so dashboard reflects execution immediately
+              await Promise.all([
+                this.loadAlerts(),
+                this.loadIncidents(),
+                this.loadFlows()
+              ]);
+            }
+          }
+        } catch (pollErr) {
+          console.warn('Backend test polling status error:', pollErr);
+        }
+      }, 800);
+
+    } catch (err) {
+      this.isBackendTestRunning = false;
+      if (btn) {
+        btn.disabled = false;
+        btn.innerHTML = '<span>⚡</span> RUN BACKEND TEST';
+      }
+      if (pill) {
+        pill.textContent = 'ERROR';
+        pill.className = 'compliance-pill rose';
+      }
+      if (msg) msg.textContent = 'Backend test execution failed: ' + err.message;
+    }
+  }
+
+  renderBackendTestResult(result) {
+    if (!result) return;
+    const sessionEl = this.backendTestSessionId;
+    if (sessionEl && result.session_id) sessionEl.textContent = result.session_id;
+
+    const summary = result.summary || {};
+    const pParsed = this.backendTestPackets;
+    if (pParsed && summary.packets !== undefined) pParsed.textContent = summary.packets.toLocaleString();
+    const fEmitted = this.backendTestFlows;
+    if (fEmitted && summary.records !== undefined) fEmitted.textContent = summary.records.toLocaleString();
+    const aEmitted = this.backendTestAlerts;
+    if (aEmitted && summary.alerts !== undefined) aEmitted.textContent = summary.alerts.toLocaleString();
+    const eTime = this.backendTestElapsed;
+    if (eTime && summary.elapsed_sec !== undefined) eTime.textContent = `${summary.elapsed_sec.toFixed(1)}s`;
+
+    const pill = this.backendTestPill;
+    if (pill) {
+      pill.textContent = result.error ? 'ERROR' : 'COMPLETED';
+      pill.className = result.error ? 'compliance-pill rose' : 'compliance-pill emerald';
+    }
+
+    const msg = this.backendTestActionMsg;
+    if (msg) {
+      const pcapBase = (result.pcap || '').split(/[\\/]/).pop();
+      if (result.error) {
+        msg.textContent = 'Execution failed: ' + result.error;
+      } else {
+        const pkts = summary.packets || 0;
+        const flows = summary.records || 0;
+        const alts = summary.alerts || 0;
+        msg.textContent = `Completed scenario "${pcapBase}": ${pkts.toLocaleString()} pkts, ${flows.toLocaleString()} flows, ${alts.toLocaleString()} promoted alerts.`;
+      }
+    }
+  }
+
+  async loadLastBackendTestResult() {
+    try {
+      const res = await fetch(this.apiUrl('/api/backend-test/last_result'));
+      if (res.ok) {
+        const data = await res.json();
+        if (data && data.status === 'available' && data.last_backend_test_result) {
+          this.lastCompletedBackendTest = data.last_backend_test_result;
+          if (!this.isBackendTestRunning) {
+            this.renderBackendTestResult(this.lastCompletedBackendTest);
+          }
+        }
+      }
+    } catch (err) {
+      console.warn('Failed to load last backend test result:', err);
+    }
+  }
+
   /* ========================================================================
      5. TELEMETRY & SYSTEM UI UPDATERS
      ======================================================================== */
@@ -1454,9 +1705,15 @@ class DiodeSentinelApp {
         recent.forEach(alert => {
           const item = document.createElement('div');
           item.className = 'threat-preview-item';
+          const isBackendTest = alert.source === 'BACKEND_TEST' || (alert.session_id && alert.session_id.startsWith('TEST-'));
+          const sourceBadge = isBackendTest
+            ? '<span class="source-tag badge-backend-test">BACKEND TEST</span>'
+            : '<span class="source-tag badge-live">LIVE</span>';
           item.innerHTML = `
             <div>
-              <div style="font-size:12px; font-weight:800; color:#0F172A;">${this.formatThreatName(alert.threat_class)}</div>
+              <div style="font-size:12px; font-weight:800; color:#0F172A; display:flex; align-items:center;">
+                ${this.formatThreatName(alert.threat_class)} ${sourceBadge}
+              </div>
               <div style="font-size:11px; font-family:var(--font-mono); color:#64748B;">${alert.src_ip || '0.0.0.0'} &rarr; ${alert.dst_ip || '0.0.0.0'}</div>
             </div>
             <div style="text-align:right;">
@@ -1527,10 +1784,14 @@ class DiodeSentinelApp {
           const tr = document.createElement('tr');
           const timeFormatted = alert.timestamp ? new Date(alert.timestamp).toLocaleTimeString() : '--:--:--';
           const port = this.extractPort(alert.flow_identifier);
+          const isBackendTest = alert.source === 'BACKEND_TEST' || (alert.session_id && alert.session_id.startsWith('TEST-'));
+          const sourceBadge = isBackendTest
+            ? '<span class="source-tag badge-backend-test">BACKEND TEST</span>'
+            : '<span class="source-tag badge-live">LIVE</span>';
 
           tr.innerHTML = `
             <td><span class="severity-pill ${this.getSeverityClass(alert)}">${this.getSeverityLabel(alert)}</span></td>
-            <td><span class="threat-tag">${this.formatThreatName(alert.threat_class)}</span></td>
+            <td><span class="threat-tag">${this.formatThreatName(alert.threat_class)}</span> ${sourceBadge}</td>
             <td class="mono-cell">${alert.src_ip || '--'}</td>
             <td class="mono-cell">${alert.dst_ip || '--'}</td>
             <td class="mono-cell">${port}</td>
@@ -1577,11 +1838,16 @@ class DiodeSentinelApp {
           const card = document.createElement('div');
           card.className = 'threat-mobile-card';
           const timeFormatted = alert.timestamp ? new Date(alert.timestamp).toLocaleTimeString() : '--:--:--';
+          const isBackendTest = alert.source === 'BACKEND_TEST' || (alert.session_id && alert.session_id.startsWith('TEST-'));
+          const sourceBadge = isBackendTest
+            ? '<span class="source-tag badge-backend-test">BACKEND TEST</span>'
+            : '<span class="source-tag badge-live">LIVE</span>';
 
           card.innerHTML = `
             <div class="mob-card-top">
               <span class="severity-pill ${this.getSeverityClass(alert)}">${this.getSeverityLabel(alert)}</span>
               <span class="threat-tag">${this.formatThreatName(alert.threat_class)}</span>
+              ${sourceBadge}
               <span style="font-size:11px; font-family:var(--font-mono); color:#94A3B8;">${timeFormatted}</span>
             </div>
             <div class="mob-flow-row">
@@ -1688,10 +1954,16 @@ class DiodeSentinelApp {
         `;
       }
 
+      const isBackendTest = inc.source === 'BACKEND_TEST' || (inc.session_id && inc.session_id.startsWith('TEST-'));
+      const sourceBadge = isBackendTest
+        ? '<span class="source-tag badge-backend-test">BACKEND TEST</span>'
+        : '<span class="source-tag badge-live">LIVE</span>';
+
       card.innerHTML = `
         <div class="incident-card-top">
           <div style="display:flex; align-items:center; gap:10px;">
             <span class="incident-id-tag">${inc.incident_id || 'INC-CAMPAIGN-001'}</span>
+            ${sourceBadge}
             <span style="font-size:12px; font-weight:700; color:#64748B;">Target Host: <strong>${inc.host || '192.168.1.100'}</strong></span>
           </div>
           <span class="severity-multiplier-pill">${inc.severity_multiplier || 2.5}x MULTIPLIER (CRITICAL)</span>

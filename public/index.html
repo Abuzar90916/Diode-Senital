@@ -1013,6 +1013,65 @@
               </div>
             </div>
           </div>
+
+          <!-- Backend SOC Verification Engine Card -->
+          <div class="system-card highlight-border" style="border-color: rgba(99, 102, 241, 0.4);">
+            <div class="sys-card-header">
+              <div class="sys-header-left">
+                <span class="sys-icon">⚡</span>
+                <div>
+                  <h3 class="sys-title">Backend SOC Verification Engine</h3>
+                  <span class="sys-subtitle">Live Production Pipeline Attack Execution (POST /api/backend-test/start)</span>
+                </div>
+              </div>
+              <span class="compliance-pill purple" id="backendTestPill">STANDBY</span>
+            </div>
+
+            <div style="margin-bottom: 14px;">
+              <label for="backendTestScenarioSelect" style="display:block; font-size:11px; font-weight:700; color:var(--text-muted); margin-bottom:6px; letter-spacing:0.04em;">
+                TARGET ATTACK SCENARIO:
+              </label>
+              <select id="backendTestScenarioSelect" class="form-select" style="width:100%; padding:10px 12px; border-radius:var(--radius-md); border:1px solid var(--border-card); background:var(--bg-canvas); font-size:13px; font-weight:600; color:var(--text-main);">
+                <option value="data_generation/pcaps/attack_portscan.pcap">Port Scan / Reconnaissance (196 pkts &bull; 621 alerts)</option>
+                <option value="data_generation/pcaps/attack_c2_beacon.pcap">C2 Periodic Beaconing Channel (43 pkts &bull; 17 alerts)</option>
+                <option value="data_generation/pcaps/attack_dga.pcap">DGA / DNS Tunnelling (50 pkts &bull; 50 alerts)</option>
+                <option value="data_generation/pcaps/attack_encrypted_malware.pcap">Encrypted Malware Dynamics (80 pkts &bull; 10 alerts)</option>
+                <option value="data_generation/pcaps/attack_exfil.pcap">Data Exfiltration Burst (223 pkts &bull; 11 alerts)</option>
+                <option value="data_generation/pcaps/attack_ddos_syn.pcap">DDoS SYN Flood (1,000 pkts &bull; 4,236 alerts)</option>
+              </select>
+            </div>
+
+            <div class="compliance-metrics-table">
+              <div class="c-row">
+                <span class="c-key">Active Session ID:</span>
+                <span class="c-val mono" id="backendTestSessionId">STANDBY</span>
+              </div>
+              <div class="c-row">
+                <span class="c-key">Packets Ingested:</span>
+                <span class="c-val mono" id="backendTestPackets">0</span>
+              </div>
+              <div class="c-row">
+                <span class="c-key">Flow Feature Records:</span>
+                <span class="c-val mono" id="backendTestFlows">0</span>
+              </div>
+              <div class="c-row">
+                <span class="c-key">Promoted Alerts (ThreatCore):</span>
+                <span class="c-val mono emerald-text" id="backendTestAlerts">0</span>
+              </div>
+              <div class="c-row">
+                <span class="c-key">Execution Elapsed Time:</span>
+                <span class="c-val mono" id="backendTestElapsed">0.0s</span>
+              </div>
+            </div>
+
+            <div class="backend-test-msg" id="backendTestActionMsg">
+              Ready to trigger real backend attack scenario. Alerts stream directly to Overview &amp; Live Threats.
+            </div>
+
+            <button class="btn-primary" id="btnRunBackendTest" style="width:100%; margin-top:14px; padding:12px; background:linear-gradient(135deg, #4F46E5 0%, #7C3AED 100%); color:#FFFFFF; border:none; border-radius:var(--radius-md); font-weight:800; font-size:13px; cursor:pointer; display:flex; align-items:center; justify-content:center; gap:8px;">
+              <span>⚡</span> RUN BACKEND TEST
+            </button>
+          </div>
         </div>
       </section>
 

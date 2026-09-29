@@ -12,6 +12,18 @@
   <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
   
   <link rel="stylesheet" href="/static/style.css" />
+  
+  <!-- Backend API Gateway Configuration: routes Vercel frontend requests to production Render backend -->
+  <script>
+    (function() {
+      var h = (window.location && window.location.hostname) ? window.location.hostname.toLowerCase() : '';
+      var isLocal = h === 'localhost' || h === '127.0.0.1' || h === '[::1]' || h.endsWith('.local') || h.startsWith('192.168.') || h.startsWith('10.');
+      var isRender = h.indexOf('onrender.com') !== -1;
+      if (!isLocal && !isRender && !window.DIODE_API_BASE_URL) {
+        window.DIODE_API_BASE_URL = 'https://diode-senital.onrender.com';
+      }
+    })();
+  </script>
 </head>
 <body>
   <div class="app-layout">

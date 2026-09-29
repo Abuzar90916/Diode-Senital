@@ -28,7 +28,9 @@ app = FastAPI(
 # Production-safe CORS: configurable via DIODE_CORS_ORIGINS env var
 raw_cors_origins = os.environ.get("DIODE_CORS_ORIGINS", "").strip()
 if raw_cors_origins:
-    allowed_origins = [orig.strip() for orig in raw_cors_origins.split(",") if orig.strip()]
+    allowed_origins = [orig.strip().rstrip("/") for orig in raw_cors_origins.split(",") if orig.strip()]
+    if "https://diode-senital.vercel.app" not in allowed_origins:
+        allowed_origins.append("https://diode-senital.vercel.app")
 else:
     allowed_origins = [
         "http://localhost:8000",
@@ -37,6 +39,7 @@ else:
         "http://127.0.0.1:3000",
         "http://localhost:5173",
         "http://127.0.0.1:5173",
+        "https://diode-senital.vercel.app",
     ]
 
 app.add_middleware(

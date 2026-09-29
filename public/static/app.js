@@ -4,10 +4,74 @@
  */
 
 class DiodeSentinelApp {
+  /**
+   * Resolves the canonical backend API Base URL:
+   * - window.DIODE_API_BASE_URL (explicit global override)
+   * - URL query param ?api= or ?api_base=
+   * - localStorage 'DIODE_API_BASE_URL'
+   * - Localhost / private IP -> '' (local relative or port 8000)
+   * - OnRender direct host -> ''
+   * - Production Vercel (or any other domain) -> 'https://diode-senital.onrender.com'
+   */
+  static resolveApiBaseUrl() {
+    if (typeof window === 'undefined') return '';
+
+    // 1. Explicit window-level global config
+    if (window.DIODE_API_BASE_URL && typeof window.DIODE_API_BASE_URL === 'string') {
+      return window.DIODE_API_BASE_URL.trim().replace(/\/+$/, '');
+    }
+    if (window.VITE_DIODE_API_BASE_URL && typeof window.VITE_DIODE_API_BASE_URL === 'string') {
+      return window.VITE_DIODE_API_BASE_URL.trim().replace(/\/+$/, '');
+    }
+    if (window.__API_BASE__ && typeof window.__API_BASE__ === 'string') {
+      return window.__API_BASE__.trim().replace(/\/+$/, '');
+    }
+
+    // 2. Query param override (?api=https://... or ?api_base=...)
+    try {
+      const params = new URLSearchParams(window.location.search);
+      const queryApi = params.get('api') || params.get('api_base');
+      if (queryApi) {
+        return queryApi.trim().replace(/\/+$/, '');
+      }
+    } catch (_) {}
+
+    // 3. LocalStorage override
+    try {
+      const stored = localStorage.getItem('DIODE_API_BASE_URL');
+      if (stored) return stored.trim().replace(/\/+$/, '');
+    } catch (_) {}
+
+    const hostname = (window.location && window.location.hostname ? window.location.hostname.toLowerCase() : '');
+
+    // 4. Local development environments (localhost, 127.0.0.1, local private IP)
+    const isLocalhost = hostname === 'localhost' ||
+                        hostname === '127.0.0.1' ||
+                        hostname === '[::1]' ||
+                        hostname.endsWith('.local') ||
+                        hostname.startsWith('192.168.') ||
+                        hostname.startsWith('10.');
+
+    if (isLocalhost) {
+      if (window.location.port && window.location.port !== '8000') {
+        return `${window.location.protocol}//${window.location.hostname}:8000`;
+      }
+      return '';
+    }
+
+    // 5. If hosted directly on Render backend origin
+    if (hostname.includes('onrender.com')) {
+      return '';
+    }
+
+    // 6. Production frontend (Vercel deployment: diode-senital.vercel.app or any external domain)
+    return 'https://diode-senital.onrender.com';
+  }
+
   constructor() {
     // API Configuration
-    // In production on Vercel, window.DIODE_API_BASE_URL can be set by environment injection or runtime config
-    this.apiBaseUrl = (typeof window !== 'undefined' && (window.DIODE_API_BASE_URL || window.VITE_DIODE_API_BASE_URL)) || '';
+    this.apiBaseUrl = DiodeSentinelApp.resolveApiBaseUrl();
+    console.log('[Diode-Sentinel] Resolved Backend API Base:', this.apiBaseUrl || '(local relative)');
     
     // Application State
     this.currentRoute = '/dashboard/overview';
@@ -351,6 +415,7 @@ class DiodeSentinelApp {
      3. DATA SOURCE INITIALIZATION & SSE STREAMING
      ======================================================================== */
   initDataSources() {
+    this.checkHealth();
     this.checkRuntimeStatus();
     this.loadTelemetry();
     this.loadAlerts();
@@ -364,13 +429,27 @@ class DiodeSentinelApp {
     }, 4000);
   }
 
+  async checkHealth() {
+    try {
+      const res = await fetch(this.apiUrl('/api/health'));
+      if (res.ok) {
+        this.apiConnected = true;
+        this.updateConnectionStatus();
+      }
+    } catch (err) {
+      console.warn('Health check failed:', err);
+    }
+  }
+
   connectSSE() {
     if (this.eventSource) {
       this.eventSource.close();
     }
 
     try {
-      this.eventSource = new EventSource(this.apiUrl('/api/events'));
+      const sseUrl = this.apiUrl('/api/events');
+      console.log('[Diode-Sentinel] Connecting EventSource to:', sseUrl);
+      this.eventSource = new EventSource(sseUrl);
 
       this.eventSource.addEventListener('open', () => {
         this.sseConnected = true;
@@ -388,6 +467,11 @@ class DiodeSentinelApp {
             this.isLiveRunning = true;
           } else if (status.mode === 'idle') {
             this.isLiveRunning = false;
+          }
+          if (this.runtimeStatus) {
+            Object.assign(this.runtimeStatus, status);
+          } else {
+            this.runtimeStatus = status;
           }
           this.updateConnectionStatus();
         } catch (err) {
@@ -428,22 +512,32 @@ class DiodeSentinelApp {
     let pillClass = 'rose';
     let mobText = 'OFFLINE';
 
+    const isRunning = Boolean(
+      (this.runtimeStatus && this.runtimeStatus.running) ||
+      this.isLiveRunning ||
+      this.runtimeSource === 'LIVE'
+    );
+    const isDemo = Boolean(
+      this.isDemoRunning ||
+      this.runtimeSource === 'DEMO'
+    );
+
     if (!this.apiConnected) {
       modeText = 'DISCONNECTED';
       pillClass = 'rose';
       mobText = 'OFFLINE';
     } else if (!this.sseConnected) {
-      modeText = 'STREAM ERROR';
+      modeText = 'CONNECTED / NO ACTIVE STREAM';
       pillClass = 'amber';
-      mobText = 'STREAM ERR';
+      mobText = 'NO STREAM';
     } else {
       // Both API and SSE connected
-      if (this.runtimeSource === 'LIVE' || this.isLiveRunning) {
-        modeText = 'LIVE DATA';
+      if (isRunning) {
+        modeText = 'CONNECTED / LIVE';
         pillClass = 'emerald';
         mobText = 'LIVE';
-      } else if (this.runtimeSource === 'DEMO' || this.isDemoRunning) {
-        modeText = 'DEMO SESSION';
+      } else if (isDemo) {
+        modeText = 'CONNECTED / DEMO SESSION';
         pillClass = 'blue';
         mobText = 'DEMO';
       } else {
@@ -463,7 +557,13 @@ class DiodeSentinelApp {
       sysConn.className = `compliance-pill ${pillClass}`;
     }
 
-    const hostDisplay = this.apiBaseUrl ? this.apiBaseUrl : (typeof window !== 'undefined' ? window.location.origin : 'LOCAL');
+    // Truthful backend API endpoint display - never default to Vercel origin
+    const hostDisplay = this.apiBaseUrl
+      ? this.apiBaseUrl
+      : (typeof window !== 'undefined' && !window.location.hostname.includes('vercel.app')
+          ? window.location.origin
+          : 'https://diode-senital.onrender.com');
+
     const apiDisplay = document.getElementById('sysApiEndpointDisplay');
     if (apiDisplay) {
       apiDisplay.textContent = `${hostDisplay} (${this.apiConnected ? 'ONLINE' : 'UNREACHABLE'})`;
@@ -471,7 +571,30 @@ class DiodeSentinelApp {
 
     const sseDisplay = document.getElementById('sysSseStatusDisplay');
     if (sseDisplay) {
-      sseDisplay.textContent = this.sseConnected ? 'CONNECTED' : (this.apiConnected ? 'STREAM ERROR' : 'DISCONNECTED');
+      sseDisplay.textContent = this.sseConnected
+        ? 'CONNECTED'
+        : (this.apiConnected ? 'RECONNECTING...' : 'DISCONNECTED');
+    }
+
+    // Operational Mode display - derived truthfully from /api/runtime/status
+    const opModeEl = document.getElementById('sysOperationalMode');
+    if (opModeEl) {
+      if (!this.apiConnected) {
+        opModeEl.textContent = 'DISCONNECTED';
+      } else if (this.runtimeStatus) {
+        const mode = (this.runtimeStatus.mode || '').toUpperCase();
+        if (isRunning) {
+          opModeEl.textContent = 'LIVE PROMISCUOUS MONITORING';
+        } else if (isDemo) {
+          opModeEl.textContent = 'DEMO PCAP REPLAY';
+        } else if (mode === 'IDLE' || this.runtimeStatus.source === 'IDLE') {
+          opModeEl.textContent = 'STANDBY / IDLE (ZERO EGRESS)';
+        } else {
+          opModeEl.textContent = `STANDBY (${mode || 'READY'})`;
+        }
+      } else {
+        opModeEl.textContent = 'STANDBY / IDLE (ZERO EGRESS)';
+      }
     }
   }
 
@@ -977,6 +1100,10 @@ class DiodeSentinelApp {
     const st = status || this.runtimeStatus;
     if (!st) return;
 
+    if (status) {
+      this.runtimeStatus = status;
+    }
+
     const summary = st.summary || {};
 
     const pActive = document.getElementById('demoActivePcap');
@@ -1007,6 +1134,8 @@ class DiodeSentinelApp {
         kpiInferences.textContent = '--';
       }
     }
+
+    this.updateConnectionStatus();
   }
 
   /* ========================================================================

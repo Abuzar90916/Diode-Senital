@@ -5,6 +5,8 @@ import asyncio
 import queue
 import threading
 import re
+import uuid
+import psutil
 from typing import List, Dict, Any, Optional
 from datetime import datetime, timezone
 
@@ -20,14 +22,28 @@ BASE_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 app = FastAPI(
     title="Diode-Sentinel NTRO Operations Center",
     description="Unidirectional Network Diode Intrusion Detection System & Security Operations Interface",
-    version="2.4.0-DEMO"
+    version="2.4.0-PRODUCTION"
 )
+
+# Production-safe CORS: configurable via DIODE_CORS_ORIGINS env var
+raw_cors_origins = os.environ.get("DIODE_CORS_ORIGINS", "").strip()
+if raw_cors_origins:
+    allowed_origins = [orig.strip() for orig in raw_cors_origins.split(",") if orig.strip()]
+else:
+    allowed_origins = [
+        "http://localhost:8000",
+        "http://127.0.0.1:8000",
+        "http://localhost:3000",
+        "http://127.0.0.1:3000",
+        "http://localhost:5173",
+        "http://127.0.0.1:5173",
+    ]
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=allowed_origins,
     allow_credentials=True,
-    allow_methods=["*"],
+    allow_methods=["GET", "POST", "OPTIONS"],
     allow_headers=["*"],
 )
 
@@ -106,12 +122,21 @@ class RuntimeController:
         self.event_queue: queue.Queue = queue.Queue()
         self.thread: Optional[threading.Thread] = None
         self.running = False
+        self.session_id: Optional[str] = None
+        self.source: str = "IDLE"  # "DEMO", "LIVE", "IDLE"
+        self.active_pcap: Optional[str] = None
+        self.active_interface: Optional[str] = None
+        self.stop_event: Optional[threading.Event] = None
         self.last_error: Optional[str] = None
         self.last_summary: Dict[str, Any] = {}
         self.lock = threading.Lock()
 
     def _publish(self, event: Dict[str, Any]) -> None:
         with self.lock:
+            # Stamp session_id and source to ensure strict Live vs Demo isolation
+            if "data" in event and isinstance(event["data"], dict):
+                event["data"]["session_id"] = self.session_id
+                event["data"]["source"] = self.source
             self.events.append(event)
             self.events = self.events[-2000:]
         self.event_queue.put(event)
@@ -121,11 +146,24 @@ class RuntimeController:
             if self.running:
                 return self.status()
             if not pcap and not interface:
-                raise ValueError("A PCAP path or capture interface is required for live mode")
+                raise ValueError("A PCAP path or capture interface is required for runtime start")
             self.events = []
             self.last_error = None
             self.last_summary = {}
+            self.stop_event = threading.Event()
+            if pcap:
+                self.source = "DEMO"
+                self.session_id = f"DEMO-{uuid.uuid4().hex[:8].upper()}"
+                self.active_pcap = pcap
+                self.active_interface = None
+            else:
+                self.source = "LIVE"
+                self.session_id = f"LIVE-{uuid.uuid4().hex[:8].upper()}"
+                self.active_interface = interface
+                self.active_pcap = None
             self.running = True
+
+        stop_ev = self.stop_event
 
         def worker():
             try:
@@ -143,6 +181,7 @@ class RuntimeController:
                     event_callback=self._publish,
                     run_watchdog=True,
                     fail_closed=True,
+                    stop_event=stop_ev,
                 ) or {}
             except Exception as exc:
                 self.last_error = str(exc)
@@ -155,10 +194,26 @@ class RuntimeController:
         self.thread.start()
         return self.status()
 
+    def stop(self) -> Dict[str, Any]:
+        with self.lock:
+            if not self.running:
+                return self.status()
+            if self.stop_event:
+                self.stop_event.set()
+        if self.thread and self.thread.is_alive():
+            self.thread.join(timeout=3.0)
+        with self.lock:
+            self.running = False
+        return self.status()
+
     def status(self) -> Dict[str, Any]:
         with self.lock:
             return {
-                "mode": "live",
+                "mode": "live" if self.source == "LIVE" else ("demo" if self.source == "DEMO" else "idle"),
+                "source": self.source,
+                "session_id": self.session_id,
+                "active_pcap": self.active_pcap,
+                "active_interface": self.active_interface,
                 "running": self.running,
                 "events_buffered": len(self.events),
                 "last_error": self.last_error,
@@ -185,6 +240,21 @@ class RuntimeStartRequest(BaseModel):
     interface: Optional[str] = None
 
 # --- API Endpoints ---
+
+@app.get("/api/health")
+async def get_health():
+    """Health check endpoint for external monitoring, load balancers, and frontend."""
+    st = runtime_controller.status()
+    return {
+        "status": "ok",
+        "service": "diode-sentinel",
+        "source": st.get("source"),
+        "session_id": st.get("session_id"),
+        "version": "2.4.0-PRODUCTION",
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "runtime_running": st.get("running", False),
+    }
+
 
 @app.post("/api/replay/control")
 async def control_replay(req: ControlRequest):
@@ -215,6 +285,26 @@ async def start_runtime(req: RuntimeStartRequest):
         return runtime_controller.start(pcap=req.pcap, interface=req.interface)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
+
+
+@app.post("/api/runtime/stop")
+async def stop_runtime():
+    """Stops the active live capture or demo PCAP stream safely."""
+    return runtime_controller.stop()
+
+
+@app.get("/api/runtime/interfaces")
+async def get_interfaces():
+    """Returns local network interfaces available for physical live NIC capture."""
+    try:
+        nics = list(psutil.net_if_addrs().keys())
+    except Exception:
+        nics = ["eth0", "lo"]
+    return {
+        "interfaces": nics,
+        "recommended_live_interface": "eth1" if "eth1" in nics else (nics[0] if nics else "eth0"),
+        "hardware_diode_guidance": "Promiscuous Rx-only mirror interface attached to optical tap/data diode."
+    }
 
 
 @app.get("/api/runtime/status")
@@ -594,11 +684,13 @@ async def stream_events(request: Request):
     at the user's controlled replay speed.
     """
     async def event_generator():
-        # Yield initial connected status
+        rt_status = runtime_controller.status()
         initial_status = {
             "status": "CONNECTED",
-            "mode": "live",
-            "runtime": runtime_controller.status(),
+            "mode": rt_status["mode"],
+            "source": rt_status["source"],
+            "session_id": rt_status["session_id"],
+            "runtime": rt_status,
         }
         yield f"event: status\ndata: {json.dumps(initial_status)}\n\n"
 

@@ -1,0 +1,22 @@
+{
+  "version": 2,
+  "cleanUrls": true,
+  "rewrites": [
+    {
+      "source": "/static/(.*)",
+      "destination": "/dashboard/static/$1"
+    },
+    {
+      "source": "/dashboard/(.*)",
+      "destination": "/dashboard/static/index.html"
+    },
+    {
+      "source": "/dashboard",
+      "destination": "/dashboard/static/index.html"
+    },
+    {
+      "source": "/",
+      "destination": "/dashboard/static/index.html"
+    }
+  ]
+}

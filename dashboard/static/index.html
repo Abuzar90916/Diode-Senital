@@ -413,6 +413,28 @@
           </div>
         </div>
 
+        <!-- Live NIC Capture Control Bar -->
+        <div class="live-capture-control-bar" style="background: rgba(15, 23, 42, 0.75); border: 1px solid rgba(148, 163, 184, 0.2); border-radius: 8px; padding: 12px 18px; margin-bottom: 16px; display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 12px;">
+          <div style="display: flex; align-items: center; gap: 10px;">
+            <span style="font-size: 1.2rem;">📡</span>
+            <div>
+              <div style="font-size: 0.85rem; font-weight: 700; color: #E2E8F0;">Physical Data Diode NIC Capture</div>
+              <div style="font-size: 0.75rem; color: #94A3B8;">Promiscuous Rx-only passive optical tap listener (zero TX transmission)</div>
+            </div>
+          </div>
+          <div style="display: flex; align-items: center; gap: 10px; flex-wrap: wrap;">
+            <select id="liveNicSelect" class="soc-select" style="background: #1E293B; color: #E2E8F0; border: 1px solid #475569; border-radius: 6px; padding: 6px 12px; font-size: 0.8rem;">
+              <option value="">Detecting capture interfaces...</option>
+            </select>
+            <button id="btnStartLiveCapture" class="btn-action-primary" style="padding: 7px 16px; font-size: 0.8rem; background: #059669; border: none; border-radius: 6px; color: white; cursor: pointer; font-weight: 700;">
+              ▶ START LIVE MONITORING
+            </button>
+            <button id="btnStopLiveCapture" class="btn-action-danger" style="padding: 7px 16px; font-size: 0.8rem; background: #E11D48; border: none; border-radius: 6px; color: white; cursor: pointer; font-weight: 700; display: none;">
+              ⏹ STOP MONITORING
+            </button>
+          </div>
+        </div>
+
         <!-- Filter Chips Bar -->
         <div class="filter-chips-bar" id="threatFiltersBar">
           <button class="filter-chip active" data-filter="ALL">ALL ALERTS</button>
@@ -670,6 +692,31 @@
           </div>
         </div>
 
+        <!-- Validation Context, Dataset Lineage & Limitations Panel -->
+        <div class="validation-context-card" style="margin-top: 24px; background: rgba(15, 23, 42, 0.7); border: 1px solid rgba(148, 163, 184, 0.2); border-radius: 8px; padding: 18px 22px;">
+          <h4 style="margin: 0 0 12px 0; color: #93C5FD; font-size: 0.95rem; display: flex; align-items: center; gap: 8px;">
+            <span>ℹ️</span> Validation Context, Dataset Lineage & Scientific Disclosures
+          </h4>
+          <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 14px; font-size: 0.82rem; color: #CBD5E1; line-height: 1.5;">
+            <div style="background: rgba(30, 41, 59, 0.5); padding: 12px 14px; border-radius: 6px; border-left: 3px solid #3B82F6;">
+              <strong style="color: #60A5FA;">LAB / SYNTHETIC VALIDATION</strong><br>
+              • <strong>Dataset:</strong> 12 calibrated attack & benign scenario PCAPs.<br>
+              • <strong>Purpose:</strong> Validates internal mathematical feature extraction, 5 trap PCAP suppression (0 FP on S3 backups, NTP, vulnerability scanners), and multi-stage kill chains.
+            </div>
+            <div style="background: rgba(30, 41, 59, 0.5); padding: 12px 14px; border-radius: 6px; border-left: 3px solid #10B981;">
+              <strong style="color: #34D399;">EXTERNAL HOLDOUT VALIDATION (CTU-13)</strong><br>
+              • <strong>Dataset:</strong> Authentic Stratosphere Lab CTU-13 Scenario 9 Neris Botnet.<br>
+              • <strong>Labeling Disclosure:</strong> Behavioral host attribution to known infected host (147.32.84.165); not official per-flow Argus/.binetflow ground truth.<br>
+              • <strong>Limitation:</strong> Interpreted as external behavioral validation slice.
+            </div>
+            <div style="background: rgba(30, 41, 59, 0.5); padding: 12px 14px; border-radius: 6px; border-left: 3px solid #F59E0B;">
+              <strong style="color: #FBBF24;">DDoS & C2 VALIDATION DISCLOSURES</strong><br>
+              • <strong>DDoS:</strong> CTU-13 slice contained no volumetric DDoS attack traffic. Real-world holdout coverage is unavailable in this slice; validated on synthetic attack streams.<br>
+              • <strong>C2 FP Fix:</strong> Short 2-packet LAN DNS/NetBIOS single-interval artifacts (CV=0.0) resolved by requiring packet_count ≥ 4 and LAN context suppression.
+            </div>
+          </div>
+        </div>
+
         <!-- Dual-Metric Evaluation Report Table (Authentic Artifact Backed) -->
         <h3 class="section-title-sub" style="margin-top: 24px;">Dual-Metric Validation Report (Synthetic vs Authentic CTU-13 Holdout)</h3>
         <div class="threats-table-wrapper">
@@ -710,11 +757,14 @@
               <tr>
                 <td><strong>Event Stream False Alerts / Hour</strong></td>
                 <td><strong>0.0 alerts/hr</strong></td>
-                <td><strong>67.7 alerts/hr</strong> (94.3% suppression)</td>
+                <td><strong>141.3 alerts/hr</strong> (Host persistence)</td>
                 <td><span class="status-tag emerald">High Suppression</span></td>
               </tr>
             </tbody>
           </table>
+          <div style="font-size: 0.78rem; color: #94A3B8; margin-top: 10px; padding: 0 4px; line-height: 1.4;">
+            <em>* Evaluation Note: CTU-13 holdout evaluation uses behavioral/heuristic flow attribution to known infected host; not official per-flow Argus/.binetflow ground truth. CTU-13 slice contained no volumetric DDoS attack traffic (DDoS validated on synthetic streams).</em>
+          </div>
         </div>
       </section>
 
@@ -925,25 +975,25 @@
                   <span class="sys-subtitle">FastAPI Core + SSE Streaming Engine</span>
                 </div>
               </div>
-              <span class="compliance-pill blue" id="sysConnPill">CONNECTED</span>
+              <span class="compliance-pill amber" id="sysConnPill">CONNECTING...</span>
             </div>
 
             <div class="compliance-metrics-table">
               <div class="c-row">
                 <span class="c-key">Backend API Endpoint:</span>
-                <span class="c-val mono">http://127.0.0.1:8000 (Active)</span>
+                <span class="c-val mono" id="sysApiEndpointDisplay">Detecting endpoint...</span>
               </div>
               <div class="c-row">
                 <span class="c-key">SSE Event Stream:</span>
-                <span class="c-val mono emerald-text">CONNECTED (/api/events)</span>
+                <span class="c-val mono" id="sysSseStatusDisplay">INITIALIZING...</span>
               </div>
               <div class="c-row">
                 <span class="c-key">Operational Mode:</span>
-                <span class="c-val" id="sysOperationalMode">LIVE / FIXTURE READY</span>
+                <span class="c-val" id="sysOperationalMode">INITIALIZING</span>
               </div>
               <div class="c-row">
                 <span class="c-key">Enclave Host Node:</span>
-                <span class="c-val mono" id="sysHostNode">Localhost Enclave</span>
+                <span class="c-val mono" id="sysHostNode">Enclave Node</span>
               </div>
               <div class="c-row">
                 <span class="c-key">Last Watchdog Audit Check:</span>

@@ -40,7 +40,12 @@ class C2BeaconDetector(BaseDetector):
         # 1. LOCAL / DISCOVERY / BROADCAST SUPPRESSION:
         # Routine LAN discovery (NetBIOS 137/138/139, SNMP 161/162, SSDP 1900, mDNS 5353, port 0, broadcast)
         # must never be flagged as external C2 channels.
-        if dst_port in (0, 137, 138, 139, 161, 162, 1900, 2869, 5353) or dst_host.endswith(".255") or dst_host.startswith(("224.", "239.")):
+        if (
+            dst_port in (0, 137, 138, 139, 161, 162, 1900, 2869, 5353)
+            or record.src_port in (137, 138, 139)
+            or dst_host.endswith(".255")
+            or dst_host.startswith(("224.", "239."))
+        ):
             return None
 
         # Network-agnostic internal infrastructure suppression:
@@ -52,12 +57,20 @@ class C2BeaconDetector(BaseDetector):
         # Inbound responses from DNS resolvers or internal servers are not outbound C2 channels:
         if record.src_port == 53:
             return None
+        # Local DNS resolver transactions: routine name resolution to local/campus resolvers
+        # must not be flagged as external C2 channels (DNS tunneling is handled by DGADNSDetector)
+        if dst_port == 53 and (is_dest_internal or self.allowlists.is_local_or_private(record.src_ip)):
+            return None
         if record.src_port == 3389 and dst_port > 1024:
             return None
 
         # ALLOWLIST CHECK: Suppress known legitimate periodic destinations (NTP, cloud agents, OS updaters)
         if self.allowlists.is_known_periodic_dest(dst_host, port=dst_port):
             return None
+
+        # Check observation count sufficiency: require >= 4 packets before periodicity can be scored.
+        # Short 2-3 packet transactions lack statistical basis for periodicity (single IAT produces CV=0.0 artifact).
+        has_sufficient_packets = record.timing.packet_count >= 4
 
         # 2. STRENGTHENED DESTINATION ASN CONTEXT & RARITY CHECK:
         # ASN 0 = RFC1918 (internal), None = unresolved public IP, Real = known public ASN
@@ -73,12 +86,12 @@ class C2BeaconDetector(BaseDetector):
             raw_evidence.append(f"Destination ASN {dst_asn} is not in trusted infrastructure allowlist")
             is_rare_destination = True
         elif dst_asn is None and not is_dest_internal:
-            # Unresolved public ASN: require non-standard port OR verified tight timing cluster
+            # Unresolved public ASN: require non-standard port OR verified tight timing cluster with sufficient packets
             if has_non_standard_port:
                 signals.append("unresolved_public_asn_rarity")
                 raw_evidence.append(f"Unresolved public ASN on non-standard port {dst_port}")
                 is_rare_destination = True
-            elif timing.periodicity_score >= 0.85 and timing.iat_cv <= 0.10:
+            elif has_sufficient_packets and timing.periodicity_score >= 0.85 and timing.iat_cv <= 0.10:
                 signals.append("unresolved_public_asn_rarity")
                 raw_evidence.append("Unresolved public ASN with verified tight timing cluster")
                 is_rare_destination = True
@@ -87,22 +100,22 @@ class C2BeaconDetector(BaseDetector):
             # C2 beacon detector must NOT fire against trusted infrastructure
             return None
 
-        # Signal 1: High Periodicity / Strict Regularity
-        if timing.periodicity_score >= self.periodicity_threshold:
+        # Signal 1: High Periodicity / Strict Regularity (requires packet_count >= 4)
+        if has_sufficient_packets and timing.periodicity_score >= self.periodicity_threshold:
             signals.append("high_periodicity_regularity")
             raw_evidence.append(
-                f"High IAT periodicity score: {timing.periodicity_score:.3f} (threshold: {self.periodicity_threshold:.2f})"
+                f"High IAT periodicity score: {timing.periodicity_score:.3f} (threshold: {self.periodicity_threshold:.2f}, packets: {timing.packet_count})"
             )
 
-        # Signal 2: Low IAT Variance (Coefficient of Variation)
-        if timing.iat_cv <= self.max_iat_cv and timing.iat_mean_ms > 50.0:
+        # Signal 2: Low IAT Variance (Coefficient of Variation, requires packet_count >= 4)
+        if has_sufficient_packets and timing.iat_cv <= self.max_iat_cv and timing.iat_mean_ms > 50.0:
             signals.append("low_iat_variance")
             raw_evidence.append(
-                f"Low IAT variance (CV: {timing.iat_cv:.4f} over mean {timing.iat_mean_ms:.1f}ms interval)"
+                f"Low IAT variance (CV: {timing.iat_cv:.4f} over mean {timing.iat_mean_ms:.1f}ms interval, packets: {timing.packet_count})"
             )
 
-        # Signal 3: Timing Cluster Regularity Anomaly
-        if timing.periodicity_score >= 0.85 and timing.iat_cv <= 0.10:
+        # Signal 3: Timing Cluster Regularity Anomaly (requires packet_count >= 4)
+        if has_sufficient_packets and timing.periodicity_score >= 0.85 and timing.iat_cv <= 0.10:
             signals.append("tight_timing_cluster_beacon")
             raw_evidence.append(
                 f"Tight timing cluster: Periodicity {timing.periodicity_score:.3f}, IAT CV {timing.iat_cv:.4f}"

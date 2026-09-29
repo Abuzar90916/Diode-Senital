@@ -105,6 +105,7 @@ def run_pipeline(
     run_watchdog: bool = True,
     required_windows: int = 3,
     fail_closed: bool = True,
+    stop_event: Optional[Any] = None,
 ):
     print("=================================================================")
     print("  DIODE-SENTINEL: Unidirectional Cyber Threat Feature Engine     ")
@@ -180,6 +181,9 @@ def run_pipeline(
 
     try:
         for pkt in packet_stream:
+            if stop_event and stop_event.is_set():
+                print("[*] Pipeline stop signal received. Halting packet loop.")
+                break
             # Immediate fail-closed check if background watchdog detected egress
             if watchdog and not watchdog.compliant:
                 reasons = "; ".join(v["reason"] for v in watchdog.violations[-3:])

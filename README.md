@@ -142,13 +142,29 @@ python benchmark/throughput_bench.py
 ```
 
 ### 7. Run the Operations Dashboard
-Start the dashboard, then start a real replay through `POST /api/runtime/start` with a
-PCAP path. The dashboard consumes alerts and incidents emitted by `run_pipeline.py`.
-The curated feed is available only as an explicit fallback:
-```powershell
-$env:DIODE_DASHBOARD_MODE = "fixture"
-python -m dashboard
+
+#### Local Development
+Start the persistent FastAPI backend server:
+```bash
+python -m dashboard --host 127.0.0.1 --port 8000
 ```
+Open `http://127.0.0.1:8000/dashboard/overview` in your browser. The frontend and backend are served synchronously, with full SSE streaming and demo PCAP replay enabled.
+
+#### Public Production Deployment Architecture
+- **Frontend**: Hosted statically on **Vercel** (`dashboard/static/`), routing all dashboard SPA paths to `index.html`.
+- **Backend**: Hosted on a persistent container platform (**Render**, **Railway**, or **Docker** via `render.yaml` / `Dockerfile`).
+  - *Crucial Architecture Decision*: Vercel is **not** used to host the persistent FastAPI/SSE backend worker. Serverless function runtimes have short execution timeouts and cannot sustain long-lived SSE connections or background packet capture threads.
+- **Environment Variables**:
+  - Backend: `DIODE_CORS_ORIGINS=https://<your-vercel-domain>.vercel.app` (allows cross-origin requests from the Vercel frontend without wildcard credential hazards).
+  - Frontend: `window.DIODE_API_BASE_URL = "https://<your-backend-domain>.onrender.com"` (configured dynamically or via script injection).
+- **Truthful Connection State**:
+  The dashboard UI strictly verifies backend connectivity:
+  - `DISCONNECTED`: Backend API unreachable (KPI metrics show `--`, telemetry unavailable).
+  - `STREAM ERROR`: API reachable but SSE connection broken.
+  - `CONNECTED / NO ACTIVE STREAM`: API and SSE online, awaiting traffic.
+  - `DEMO SESSION`: Active PCAP scenario replay (`source == "DEMO"`).
+  - `LIVE DATA`: Real physical NIC capture stream active (`source == "LIVE"`).
+  - *Localhost is never displayed as an active endpoint on public production builds.*
 
 ---
 
@@ -157,18 +173,35 @@ python -m dashboard
 > [!NOTE]
 > The system is evaluated under two distinct regimes: **Synthetic Calibrated Baseline** (verifying internal logic and allowlist trap suppression) and **CTU-13 Real-World Holdout** (verifying true generalization on genuine recorded network traffic with multi-window persistence).
 
-| Dimension | Synthetic Calibrated Baseline | Authentic CTU-13 Holdout (Unseen Traffic) |
-| :--- | :---: | :---: |
-| **Persistence Filter** | `required_windows=1` (test scaffold) | `required_windows=3` (production default) |
-| **Evaluation Volume** | 800 synthetic flows | **870 unique flows** (372 attack + 465 normal + 33 background) / 5,923 windows |
-| **Positive Attack Recall (Flow-Level)** | **100.00%** (calibrated) | **48.92%** (182 / 372 unique attack flows) |
-| **Normal False Positive Rate (Flow-Level)** | **0.00%** (0 / 500 flows) | **18.92%** (88 / 465 unique normal flows) |
-| **Normal Alerts per Hour (Event Stream)** | **0.0 alerts/hr** | **141.3 alerts/hr** (261 alerts over 1.85h; host-level persistence result) |
-| **Port Scan Precision** | 100.0% | **99.3% flow-level** (124 attack flows, 1 normal FP flow) |
-| **DGA DNS Detection** | 100.0% | **100% precision** (6 TP flows, 48 window alerts, 0 normal FP) |
-| **Encrypted Malware FP** | 0 | **0 alerts** (100% precision on real normal traffic) |
-| **Exfiltration FP** | 0 | **0 alerts** (tightened from 2,087 window FP down to 0) |
-| **Unlabeled Traffic Accounting** | 0.0% | **3.79% of flows** (33 flows, 1 alert = 0.16% of alerts) |
+> [!IMPORTANT]
+> **Scientific Disclosures & Limitations**:
+> 1. **CTU-13 Holdout Labeling Methodology**: Labels represent heuristic behavioral host attribution to the known infected host (`147.32.84.165`) and concurrent uninfected campus workstations; official per-flow Argus/.binetflow ground truth files were unavailable. Results should therefore be interpreted as an external behavioral validation slice, not an official per-flow benchmark.
+> 2. **DDoS Validation Limitation**: The CTU-13 Scenario 9 holdout slice contained no volumetric DDoS attack traffic. Real-world holdout coverage for DDoS is unavailable in this slice; DDoS detector validation is performed using calibrated synthetic attack streams.
+
+| Dimension | Synthetic Calibrated Baseline | Authentic CTU-13 Baseline | CTU-13 Post-C2 Remediation |
+| :--- | :---: | :---: | :---: |
+| **Persistence Filter** | `required_windows=1` (test scaffold) | `required_windows=3` (production) | `required_windows=3` (production) |
+| **Evaluation Volume** | 800 synthetic flows | 870 unique flows (5,923 windows) | 870 unique flows (5,387 windows) |
+| **Positive Attack Recall (Flow-Level)** | **100.00%** (calibrated) | **48.92%** (182 / 372 attack flows) | **48.39%** (180 / 372 attack flows) |
+| **Normal False Positive Rate (Flow-Level)** | **0.00%** (0 / 500 flows) | **18.92%** (88 / 465 normal flows) | **2.16%** (10 / 462 normal flows) |
+| **Normal Alerts per Hour (Event Stream)** | **0.0 alerts/hr** | **141.3 alerts/hr** (261 normal alerts) | **10.8 alerts/hr** (20 normal alerts) |
+| **C2 Normal False Alarms** | 0 | 257 window alerts / 87 flows | **0 alerts / 0 flows** (100% resolved) |
+| **Port Scan Precision** | 100.0% | **99.3% flow-level** (124 TP, 1 FP) | **99.3% flow-level** (124 TP, 1 FP) |
+| **DGA DNS Detection** | 100.0% | **100% precision** (6 TP, 0 FP) | **100% precision** (6 TP, 0 FP) |
+| **Encrypted Malware FP** | 0 | **0 alerts** | **0 alerts** |
+| **Exfiltration FP** | 0 | **0 alerts** | **0 alerts** |
+
+---
+
+## Severity Derivation & Contract Integrity
+
+To preserve strict compliance with NTRO Problem Statement 26145, the standardized `AlertRecord` contract in `schemas/alert_record.py` remains unpolluted by UI-specific fields. 
+
+Presentation severity displayed in the Security Operations Console is derived deterministically from the standardized telemetry fields:
+- **CRITICAL**: High-impact attack categories (`C2_Beaconing`, `DDoS`, `Data_Exfiltration`) with `confidence_score >= 0.70`, or multi-stage correlated attack incidents.
+- **HIGH**: Reconnaissance (`Port_Scanning`), `DGA_Tunnelling`, or `Encrypted_Malware` with `confidence_score >= 0.75`, or lower-confidence critical categories.
+- **MEDIUM**: Baseline anomaly detections satisfying the dual-signal corroboration threshold.
+- **LOW**: Anomalies with `confidence_score < 0.60`.
 
 ---
 

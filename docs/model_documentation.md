@@ -87,6 +87,8 @@ ThreatCore combines statistical threshold matrices, unsupervised Isolation Fores
 
 ### Corroboration Rule
 - **Rule**: Requires high periodicity ($\ge 0.75$) or low IAT variance ($CV \le 0.15$) **AND** destination rarity (`dst_asn is None` or unlisted external ASN) with non-standard destination port.
+- **Minimum Observation Count Requirement**: Requires `packet_count >= 4` before periodicity features contribute, preventing mathematical single-interval artifacts ($CV = 0.0$) on short 2-packet transactions from triggering false alarms.
+- **LAN & Campus Context**: Suppresses internal LAN/campus DNS (`dst_port == 53`) and NetBIOS broadcasts (`ports 137-139`).
 - **FP Prevention / Trap Validation**:
   - **Trap PCAP**: `benign_periodic_heartbeat.pcap` (NTP on port 123, Microsoft OS updates, health-check agents).
   - **Result**: **PASSED (0 False Alerts)**. All allowlisted periodic destinations and trusted cloud ASNs are suppressed regardless of high periodicity score ($0.98$).

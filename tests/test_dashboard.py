@@ -102,3 +102,12 @@ def test_compliance_reset_api(client):
     assert res.status_code == 200
     data = res.json()
     assert data["status"] == "success"
+
+def test_health_endpoint(client):
+    res = client.get("/api/health")
+    assert res.status_code == 200
+    data = res.json()
+    assert data["status"] == "ok"
+    assert data["service"] == "diode-sentinel"
+    assert "source" in data
+    assert "session_id" in data

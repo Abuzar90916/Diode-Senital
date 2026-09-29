@@ -25,6 +25,3 @@ test = [
 all = [
     "diode-sentinel[ml,test]",
 ]
-
-[tool.vercel]
-entrypoint = "main:app"

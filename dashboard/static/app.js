@@ -5,6 +5,10 @@
 
 class DiodeSentinelApp {
   constructor() {
+    // API Configuration
+    // In production on Vercel, window.DIODE_API_BASE_URL can be set by environment injection or runtime config
+    this.apiBaseUrl = (typeof window !== 'undefined' && (window.DIODE_API_BASE_URL || window.VITE_DIODE_API_BASE_URL)) || '';
+    
     // Application State
     this.currentRoute = '/dashboard/overview';
     this.alerts = [];
@@ -15,11 +19,20 @@ class DiodeSentinelApp {
     this.complianceData = null;
     this.runtimeStatus = null;
     this.demoScenarios = [];
+    this.availableInterfaces = [];
     
+    // Connection State Machine (Truthful State Tracking)
+    this.apiConnected = false;
+    this.sseConnected = false;
+    this.runtimeMode = 'idle';
+    this.runtimeSource = null; // 'LIVE', 'DEMO', or null
+    this.runtimeSessionId = null;
+
     // UI Filters & Paging
     this.activeThreatFilter = 'ALL';
     this.activeTimeWindow = '1H';
     this.isDemoRunning = false;
+    this.isLiveRunning = false;
     this.demoPollingTimer = null;
     this.eventSource = null;
 
@@ -29,6 +42,13 @@ class DiodeSentinelApp {
     this.initEventListeners();
     this.initDataSources();
     this.connectSSE();
+    this.loadInterfaces();
+  }
+
+  apiUrl(path) {
+    const base = (this.apiBaseUrl || '').replace(/\/+$/, '');
+    const cleanPath = path.startsWith('/') ? path : `/${path}`;
+    return base ? `${base}${cleanPath}` : cleanPath;
   }
 
   /* ========================================================================
@@ -181,6 +201,13 @@ class DiodeSentinelApp {
     this.alertDetailModal = document.getElementById('alertDetailModal');
     this.flowDetailModal = document.getElementById('flowDetailModal');
 
+    // Live Capture Controls
+    this.btnStartLiveCapture = document.getElementById('btnStartLiveCapture');
+    this.btnStopLiveCapture = document.getElementById('btnStopLiveCapture');
+    this.selLiveInterface = document.getElementById('selLiveInterface');
+    this.liveCaptureStatusBadge = document.getElementById('liveCaptureStatusBadge');
+    this.liveCaptureSummary = document.getElementById('liveCaptureSummary');
+
     // Close buttons
     this.btnCloseValidation = document.getElementById('btnCloseValidation');
     this.btnDismissValidation = document.getElementById('btnDismissValidation');
@@ -214,6 +241,14 @@ class DiodeSentinelApp {
     }
     if (this.btnDrawerClose) {
       this.btnDrawerClose.addEventListener('click', () => this.closeMobileDrawer());
+    }
+
+    // Live Capture controls
+    if (this.btnStartLiveCapture) {
+      this.btnStartLiveCapture.addEventListener('click', () => this.startLiveMonitoring());
+    }
+    if (this.btnStopLiveCapture) {
+      this.btnStopLiveCapture.addEventListener('click', () => this.stopLiveMonitoring());
     }
 
     // Time window selector chips
@@ -316,15 +351,16 @@ class DiodeSentinelApp {
      3. DATA SOURCE INITIALIZATION & SSE STREAMING
      ======================================================================== */
   initDataSources() {
+    this.checkRuntimeStatus();
     this.loadTelemetry();
     this.loadAlerts();
     this.loadIncidents();
     this.loadComplianceAudit();
 
-    // Periodically update telemetry
+    // Periodically update telemetry & runtime status
     setInterval(() => {
-      this.loadTelemetry();
       this.checkRuntimeStatus();
+      this.loadTelemetry();
     }, 4000);
   }
 
@@ -333,50 +369,126 @@ class DiodeSentinelApp {
       this.eventSource.close();
     }
 
-    this.eventSource = new EventSource('/api/events');
+    try {
+      this.eventSource = new EventSource(this.apiUrl('/api/events'));
 
-    this.eventSource.addEventListener('status', (e) => {
-      try {
-        const status = JSON.parse(e.data);
-        this.updateConnectionStatus(true, status.mode === 'live' ? 'LIVE' : 'DEMO');
-      } catch (err) {
-        console.warn('SSE status parse error:', err);
-      }
-    });
+      this.eventSource.addEventListener('open', () => {
+        this.sseConnected = true;
+        this.updateConnectionStatus();
+      });
 
-    this.eventSource.addEventListener('alert', (e) => {
-      try {
-        const alertData = JSON.parse(e.data);
-        this.handleIncomingAlert(alertData);
-      } catch (err) {
-        console.warn('SSE alert parse error:', err);
-      }
-    });
+      this.eventSource.addEventListener('status', (e) => {
+        try {
+          const status = JSON.parse(e.data);
+          this.sseConnected = true;
+          this.runtimeMode = status.mode || 'idle';
+          this.runtimeSource = status.source || null;
+          this.runtimeSessionId = status.session_id || null;
+          if (status.mode === 'live') {
+            this.isLiveRunning = true;
+          } else if (status.mode === 'idle') {
+            this.isLiveRunning = false;
+          }
+          this.updateConnectionStatus();
+        } catch (err) {
+          console.warn('SSE status parse error:', err);
+        }
+      });
 
-    this.eventSource.addEventListener('incident', (e) => {
-      try {
-        const incData = JSON.parse(e.data);
-        this.handleIncomingIncident(incData);
-      } catch (err) {
-        console.warn('SSE incident parse error:', err);
-      }
-    });
+      this.eventSource.addEventListener('alert', (e) => {
+        try {
+          const alertData = JSON.parse(e.data);
+          this.handleIncomingAlert(alertData);
+        } catch (err) {
+          console.warn('SSE alert parse error:', err);
+        }
+      });
 
-    this.eventSource.addEventListener('error', (e) => {
-      this.updateConnectionStatus(false, 'RECONNECTING');
-    });
+      this.eventSource.addEventListener('incident', (e) => {
+        try {
+          const incData = JSON.parse(e.data);
+          this.handleIncomingIncident(incData);
+        } catch (err) {
+          console.warn('SSE incident parse error:', err);
+        }
+      });
+
+      this.eventSource.addEventListener('error', () => {
+        this.sseConnected = false;
+        this.updateConnectionStatus();
+      });
+    } catch (err) {
+      this.sseConnected = false;
+      this.updateConnectionStatus();
+    }
   }
 
-  updateConnectionStatus(connected, modeText) {
+  updateConnectionStatus() {
+    let modeText = 'DISCONNECTED';
+    let pillClass = 'rose';
+    let mobText = 'OFFLINE';
+
+    if (!this.apiConnected) {
+      modeText = 'DISCONNECTED';
+      pillClass = 'rose';
+      mobText = 'OFFLINE';
+    } else if (!this.sseConnected) {
+      modeText = 'STREAM ERROR';
+      pillClass = 'amber';
+      mobText = 'STREAM ERR';
+    } else {
+      // Both API and SSE connected
+      if (this.runtimeSource === 'LIVE' || this.isLiveRunning) {
+        modeText = 'LIVE DATA';
+        pillClass = 'emerald';
+        mobText = 'LIVE';
+      } else if (this.runtimeSource === 'DEMO' || this.isDemoRunning) {
+        modeText = 'DEMO SESSION';
+        pillClass = 'blue';
+        mobText = 'DEMO';
+      } else {
+        modeText = 'CONNECTED / NO ACTIVE STREAM';
+        pillClass = 'sky';
+        mobText = 'IDLE';
+      }
+    }
+
     const textEl = document.getElementById('mobileStatusText');
     if (textEl) {
-      textEl.textContent = connected ? modeText : 'RECONNECT';
+      textEl.textContent = mobText;
     }
     const sysConn = document.getElementById('sysConnPill');
     if (sysConn) {
-      sysConn.textContent = connected ? 'CONNECTED' : 'DISCONNECTED';
-      sysConn.className = `compliance-pill ${connected ? 'emerald' : 'rose'}`;
+      sysConn.textContent = modeText;
+      sysConn.className = `compliance-pill ${pillClass}`;
     }
+
+    const hostDisplay = this.apiBaseUrl ? this.apiBaseUrl : (typeof window !== 'undefined' ? window.location.origin : 'LOCAL');
+    const apiDisplay = document.getElementById('sysApiEndpointDisplay');
+    if (apiDisplay) {
+      apiDisplay.textContent = `${hostDisplay} (${this.apiConnected ? 'ONLINE' : 'UNREACHABLE'})`;
+    }
+
+    const sseDisplay = document.getElementById('sysSseStatusDisplay');
+    if (sseDisplay) {
+      sseDisplay.textContent = this.sseConnected ? 'CONNECTED' : (this.apiConnected ? 'STREAM ERROR' : 'DISCONNECTED');
+    }
+  }
+
+  getLiveAlerts() {
+    return this.alerts.filter(a => a.source === 'LIVE' || (a.session_id && a.session_id.startsWith('LIVE-')));
+  }
+
+  getDemoAlerts() {
+    return this.alerts.filter(a => a.source === 'DEMO' || (a.session_id && a.session_id.startsWith('DEMO-')));
+  }
+
+  getLiveIncidents() {
+    return this.incidents.filter(i => i.source === 'LIVE' || (i.session_id && i.session_id.startsWith('LIVE-')));
+  }
+
+  getDemoIncidents() {
+    return this.incidents.filter(i => i.source === 'DEMO' || (i.session_id && i.session_id.startsWith('DEMO-')));
   }
 
   handleIncomingAlert(alert) {
@@ -409,8 +521,11 @@ class DiodeSentinelApp {
   }
 
   updateCounters() {
-    const threatCount = this.alerts.length;
-    const incidentCount = this.incidents.length;
+    const liveAlerts = this.getLiveAlerts();
+    const liveIncidents = this.getLiveIncidents();
+
+    const threatCount = liveAlerts.length;
+    const incidentCount = liveIncidents.length;
 
     // Desktop sidebar counters
     const sbThreatEl = document.getElementById('sidebarThreatCount');
@@ -440,31 +555,139 @@ class DiodeSentinelApp {
 
     // Page titles count
     const totalThreatEl = document.getElementById('totalThreatCount');
-    if (totalThreatEl) totalThreatEl.textContent = threatCount;
+    if (totalThreatEl) {
+      totalThreatEl.textContent = !this.apiConnected ? '--' : (threatCount > 0 ? threatCount : '0');
+    }
     
     const activeIncEl = document.getElementById('activeIncidentsCount');
-    if (activeIncEl) activeIncEl.textContent = incidentCount;
+    if (activeIncEl) {
+      activeIncEl.textContent = !this.apiConnected ? '--' : (incidentCount > 0 ? incidentCount : '0');
+    }
   }
 
   /* ========================================================================
-     4. API DATA FETCHERS (NO FABRICATED NUMBERS)
+     4. API DATA FETCHERS & HARDWARE INTERFACES
      ======================================================================== */
-  async loadTelemetry() {
+  async loadInterfaces() {
     try {
-      const res = await fetch('/api/telemetry');
+      const res = await fetch(this.apiUrl('/api/runtime/interfaces'));
       if (res.ok) {
-        this.telemetry = await res.json();
-        this.updateTelemetryUI();
+        const data = await res.json();
+        this.availableInterfaces = data.interfaces || [];
+        const sel = this.selLiveInterface;
+        if (sel) {
+          sel.innerHTML = '';
+          if (this.availableInterfaces.length === 0) {
+            const opt = document.createElement('option');
+            opt.value = '';
+            opt.textContent = 'No sniffable interface detected';
+            sel.appendChild(opt);
+            if (this.btnStartLiveCapture) this.btnStartLiveCapture.disabled = true;
+          } else {
+            this.availableInterfaces.forEach(iface => {
+              const opt = document.createElement('option');
+              opt.value = iface;
+              opt.textContent = iface;
+              sel.appendChild(opt);
+            });
+            if (this.btnStartLiveCapture) this.btnStartLiveCapture.disabled = false;
+          }
+        }
+        if (this.liveCaptureSummary) {
+          this.liveCaptureSummary.textContent = data.available 
+            ? `${this.availableInterfaces.length} network interface(s) identified for promiscuous monitoring.`
+            : (data.note || 'Promiscuous NIC capture requires elevated privileges.');
+        }
       }
     } catch (err) {
+      console.warn('Interfaces load failed:', err);
+    }
+  }
+
+  async startLiveMonitoring() {
+    const sel = this.selLiveInterface;
+    const iface = sel ? sel.value : null;
+
+    if (this.btnStartLiveCapture) this.btnStartLiveCapture.disabled = true;
+    if (this.btnStopLiveCapture) this.btnStopLiveCapture.disabled = false;
+    if (this.liveCaptureStatusBadge) {
+      this.liveCaptureStatusBadge.textContent = 'STARTING...';
+      this.liveCaptureStatusBadge.className = 'console-badge running';
+    }
+
+    try {
+      const res = await fetch(this.apiUrl('/api/runtime/start'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ mode: 'live', interface: iface || undefined, source: 'LIVE' })
+      });
+      const data = await res.json();
+      if (data.status === 'started' || data.status === 'already_running') {
+        this.isLiveRunning = true;
+        this.runtimeMode = 'live';
+        this.runtimeSource = 'LIVE';
+        if (this.liveCaptureStatusBadge) {
+          this.liveCaptureStatusBadge.textContent = 'CAPTURING LIVE';
+          this.liveCaptureStatusBadge.className = 'console-badge running';
+        }
+        if (this.liveCaptureSummary) {
+          this.liveCaptureSummary.textContent = `Streaming packets from interface "${iface || 'default'}" into passive Diode ingestion pipeline.`;
+        }
+        this.updateConnectionStatus();
+      } else {
+        alert('Live capture could not start: ' + (data.error || JSON.stringify(data)));
+        if (this.btnStartLiveCapture) this.btnStartLiveCapture.disabled = false;
+        if (this.btnStopLiveCapture) this.btnStopLiveCapture.disabled = true;
+      }
+    } catch (err) {
+      alert('Failed to start live capture: ' + err.message);
+      if (this.btnStartLiveCapture) this.btnStartLiveCapture.disabled = false;
+      if (this.btnStopLiveCapture) this.btnStopLiveCapture.disabled = true;
+    }
+  }
+
+  async stopLiveMonitoring() {
+    if (this.btnStopLiveCapture) this.btnStopLiveCapture.disabled = true;
+    try {
+      const res = await fetch(this.apiUrl('/api/runtime/stop'), { method: 'POST' });
+      await res.json();
+      this.isLiveRunning = false;
+      this.runtimeMode = 'idle';
+      this.runtimeSource = null;
+      if (this.liveCaptureStatusBadge) {
+        this.liveCaptureStatusBadge.textContent = 'STOPPED';
+        this.liveCaptureStatusBadge.className = 'console-badge';
+      }
+      if (this.btnStartLiveCapture) this.btnStartLiveCapture.disabled = false;
+      this.updateConnectionStatus();
+    } catch (err) {
+      alert('Failed to stop live capture: ' + err.message);
+      if (this.btnStopLiveCapture) this.btnStopLiveCapture.disabled = false;
+    }
+  }
+
+  async loadTelemetry() {
+    try {
+      const res = await fetch(this.apiUrl('/api/telemetry'));
+      if (res.ok) {
+        this.apiConnected = true;
+        this.telemetry = await res.json();
+        this.updateTelemetryUI();
+      } else {
+        this.apiConnected = false;
+      }
+    } catch (err) {
+      this.apiConnected = false;
       console.warn('Telemetry load failed:', err);
     }
+    this.updateConnectionStatus();
   }
 
   async loadAlerts() {
     try {
-      const res = await fetch('/api/alerts');
+      const res = await fetch(this.apiUrl('/api/alerts'));
       if (res.ok) {
+        this.apiConnected = true;
         const data = await res.json();
         if (Array.isArray(data)) {
           this.alerts = data;
@@ -472,93 +695,127 @@ class DiodeSentinelApp {
           this.renderOverview();
           this.renderThreats();
         }
+      } else {
+        this.apiConnected = false;
       }
     } catch (err) {
+      this.apiConnected = false;
       console.warn('Alerts load failed:', err);
     }
+    this.updateConnectionStatus();
   }
 
   async loadIncidents() {
     try {
-      const res = await fetch('/api/incidents');
+      const res = await fetch(this.apiUrl('/api/incidents'));
       if (res.ok) {
+        this.apiConnected = true;
         const data = await res.json();
         if (Array.isArray(data)) {
           this.incidents = data;
           this.updateCounters();
           this.renderIncidents();
         }
+      } else {
+        this.apiConnected = false;
       }
     } catch (err) {
+      this.apiConnected = false;
       console.warn('Incidents load failed:', err);
     }
+    this.updateConnectionStatus();
   }
 
   async loadFlows() {
     try {
-      const res = await fetch('/api/flows');
+      const res = await fetch(this.apiUrl('/api/flows'));
       if (res.ok) {
+        this.apiConnected = true;
         const data = await res.json();
         if (Array.isArray(data)) {
           this.flows = data;
           this.renderFlows();
           this.renderOverview();
         }
+      } else {
+        this.apiConnected = false;
       }
     } catch (err) {
+      this.apiConnected = false;
       console.warn('Flows load failed:', err);
     }
+    this.updateConnectionStatus();
   }
 
   async loadValidationData() {
     try {
-      const res = await fetch('/api/validation');
+      const res = await fetch(this.apiUrl('/api/validation'));
       if (res.ok) {
+        this.apiConnected = true;
         this.validationData = await res.json();
+      } else {
+        this.apiConnected = false;
       }
     } catch (err) {
+      this.apiConnected = false;
       console.warn('Validation data load failed:', err);
     }
+    this.updateConnectionStatus();
   }
 
   async loadComplianceAudit() {
     try {
-      const res = await fetch('/api/compliance/audit');
+      const res = await fetch(this.apiUrl('/api/compliance/audit'));
       if (res.ok) {
+        this.apiConnected = true;
         this.complianceData = await res.json();
         this.updateComplianceUI();
+      } else {
+        this.apiConnected = false;
       }
     } catch (err) {
+      this.apiConnected = false;
       console.warn('Compliance audit load failed:', err);
     }
+    this.updateConnectionStatus();
   }
 
   async loadDemoScenarios() {
     try {
-      const res = await fetch('/api/demo/scenarios');
+      const res = await fetch(this.apiUrl('/api/demo/scenarios'));
       if (res.ok) {
+        this.apiConnected = true;
         this.demoScenarios = await res.json();
+      } else {
+        this.apiConnected = false;
       }
     } catch (err) {
+      this.apiConnected = false;
       console.warn('Demo scenarios load failed:', err);
     }
+    this.updateConnectionStatus();
   }
 
   async checkRuntimeStatus() {
     try {
-      const res = await fetch('/api/runtime/status');
+      const res = await fetch(this.apiUrl('/api/runtime/status'));
       if (res.ok) {
+        this.apiConnected = true;
         this.runtimeStatus = await res.json();
         this.updateRuntimeUI();
+      } else {
+        this.apiConnected = false;
       }
     } catch (err) {
+      this.apiConnected = false;
       console.warn('Runtime status check failed:', err);
     }
+    this.updateConnectionStatus();
   }
 
   async resetWatchdog() {
     try {
-      const res = await fetch('/api/compliance/reset', { method: 'POST' });
+      const res = await fetch(this.apiUrl('/api/compliance/reset'), { method: 'POST' });
       if (res.ok) {
         alert('Diode compliance watchdog baseline recalibrated to CLEAN.');
         this.loadComplianceAudit();
@@ -589,43 +846,47 @@ class DiodeSentinelApp {
     }
 
     try {
-      const res = await fetch('/api/runtime/start', {
+      const res = await fetch(this.apiUrl('/api/runtime/start'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ pcap: pcapPath })
+        body: JSON.stringify({ pcap: pcapPath, mode: 'demo', source: 'DEMO' })
       });
       
-      const data = await res.json();
+      await res.json();
       
       // Start polling runtime until complete
       if (this.demoPollingTimer) clearInterval(this.demoPollingTimer);
       
       this.demoPollingTimer = setInterval(async () => {
-        const stRes = await fetch('/api/runtime/status');
-        if (stRes.ok) {
-          const st = await stRes.json();
-          this.updateRuntimeUI(st);
+        try {
+          const stRes = await fetch(this.apiUrl('/api/runtime/status'));
+          if (stRes.ok) {
+            const st = await stRes.json();
+            this.updateRuntimeUI(st);
 
-          if (!st.running) {
-            clearInterval(this.demoPollingTimer);
-            this.isDemoRunning = false;
-            if (triggerButton) {
-              triggerButton.disabled = false;
-              triggerButton.innerHTML = '<span>▶</span> RUN TEST';
+            if (!st.running) {
+              clearInterval(this.demoPollingTimer);
+              this.isDemoRunning = false;
+              if (triggerButton) {
+                triggerButton.disabled = false;
+                triggerButton.innerHTML = '<span>▶</span> RUN TEST';
+              }
+              if (badge) {
+                badge.textContent = 'COMPLETED';
+                badge.className = 'console-badge';
+              }
+              if (msg) {
+                const s = st.summary || {};
+                msg.textContent = `Scenario complete: ${s.packets || 0} packets parsed into ${s.records || 0} flow feature records with ${s.alerts || 0} alerts promoted in ${(s.elapsed_sec || 0).toFixed(2)}s. Zero egress verified.`;
+              }
+              // Refresh data
+              this.loadAlerts();
+              this.loadIncidents();
+              this.loadFlows();
             }
-            if (badge) {
-              badge.textContent = 'COMPLETED';
-              badge.className = 'console-badge';
-            }
-            if (msg) {
-              const s = st.summary || {};
-              msg.textContent = `Scenario complete: ${s.packets || 0} packets parsed into ${s.records || 0} flow feature records with ${s.alerts || 0} alerts promoted in ${(s.elapsed_sec || 0).toFixed(2)}s. Zero egress verified.`;
-            }
-            // Refresh data
-            this.loadAlerts();
-            this.loadIncidents();
-            this.loadFlows();
           }
+        } catch (pollErr) {
+          console.warn('Demo polling status error:', pollErr);
         }
       }, 800);
 
@@ -754,33 +1015,49 @@ class DiodeSentinelApp {
 
   // PAGE 1: OVERVIEW
   renderOverview() {
+    const liveAlerts = this.getLiveAlerts();
+    const liveIncidents = this.getLiveIncidents();
+
     // 1. KPI Cards
     const kpiThreats = document.getElementById('kpiActiveThreats');
     if (kpiThreats) {
-      kpiThreats.textContent = this.alerts.length > 0 ? this.alerts.length.toLocaleString() : '--';
+      if (!this.apiConnected) {
+        kpiThreats.textContent = '--';
+      } else if (liveAlerts.length > 0) {
+        kpiThreats.textContent = liveAlerts.length.toLocaleString();
+      } else {
+        kpiThreats.textContent = '--';
+      }
     }
 
     const kpiChains = document.getElementById('kpiAttackChains');
     if (kpiChains) {
-      kpiChains.textContent = this.incidents.length > 0 ? this.incidents.length.toLocaleString() : '--';
+      if (!this.apiConnected) {
+        kpiChains.textContent = '--';
+      } else if (liveIncidents.length > 0) {
+        kpiChains.textContent = liveIncidents.length.toLocaleString();
+      } else {
+        kpiChains.textContent = '--';
+      }
     }
 
     const kpiFlows = document.getElementById('kpiFlowsParsed');
     if (kpiFlows) {
-      kpiFlows.textContent = this.flows.length > 0 ? this.flows.length.toLocaleString() : '--';
+      kpiFlows.textContent = !this.apiConnected ? '--' : (this.flows.length > 0 ? this.flows.length.toLocaleString() : '--');
     }
 
     // 2. Threat Activity Distribution Chart (Temporal Histogram)
     const timelineContainer = document.getElementById('timelineBars');
     if (timelineContainer) {
       timelineContainer.innerHTML = '';
-      if (this.alerts.length === 0) {
-        timelineContainer.innerHTML = '<div style="margin: auto; color: #94A3B8; font-size: 12px;">No temporal activity in current buffer</div>';
+      if (!this.apiConnected) {
+        timelineContainer.innerHTML = '<div style="margin: auto; color: #EF4444; font-size: 12px; font-weight: 600;">BACKEND OFFLINE — Live telemetry unavailable</div>';
+      } else if (liveAlerts.length === 0) {
+        timelineContainer.innerHTML = '<div style="margin: auto; color: #94A3B8; font-size: 12px;">NO LIVE DATA — Awaiting stream ingestion</div>';
       } else {
-        // Group alerts into 14 temporal buckets
         const numBuckets = 14;
         const buckets = new Array(numBuckets).fill(0);
-        this.alerts.forEach((_, idx) => {
+        liveAlerts.forEach((_, idx) => {
           const bIdx = idx % numBuckets;
           buckets[bIdx]++;
         });
@@ -801,11 +1078,13 @@ class DiodeSentinelApp {
     const distContainer = document.getElementById('threatDistributionList');
     if (distContainer) {
       distContainer.innerHTML = '';
-      if (this.alerts.length === 0) {
-        distContainer.innerHTML = '<div class="distribution-empty">No threat events recorded in current buffer</div>';
+      if (!this.apiConnected) {
+        distContainer.innerHTML = '<div class="distribution-empty" style="color: #EF4444;">BACKEND OFFLINE — Awaiting connection</div>';
+      } else if (liveAlerts.length === 0) {
+        distContainer.innerHTML = '<div class="distribution-empty">NO LIVE DATA — No live threats in buffer</div>';
       } else {
         const counts = {};
-        this.alerts.forEach(a => {
+        liveAlerts.forEach(a => {
           const tc = a.threat_class || 'Unknown';
           counts[tc] = (counts[tc] || 0) + 1;
         });
@@ -814,7 +1093,7 @@ class DiodeSentinelApp {
         let colorIdx = 0;
 
         Object.entries(counts).forEach(([tClass, count]) => {
-          const pct = Math.round((count / this.alerts.length) * 100);
+          const pct = Math.round((count / liveAlerts.length) * 100);
           const color = colorClasses[colorIdx % colorClasses.length];
           colorIdx++;
 
@@ -837,16 +1116,24 @@ class DiodeSentinelApp {
     // 4. Attack-Chain Summary Card Preview
     const incPreview = document.getElementById('overviewIncidentPreview');
     if (incPreview) {
-      if (this.incidents.length === 0) {
+      if (!this.apiConnected) {
+        incPreview.innerHTML = `
+          <div class="empty-state-box">
+            <div class="empty-icon">⚠️</div>
+            <div class="empty-title">BACKEND OFFLINE</div>
+            <div class="empty-desc">Live telemetry unavailable. Verify connection to backend API.</div>
+          </div>
+        `;
+      } else if (liveIncidents.length === 0) {
         incPreview.innerHTML = `
           <div class="empty-state-box">
             <div class="empty-icon">🛡️</div>
-            <div class="empty-title">No Correlated Attack Chains Active</div>
-            <div class="empty-desc">Corroboration Engine requires multi-stage persistence across temporal sliding windows before promoting an incident.</div>
+            <div class="empty-title">No Correlated Live Attack Chains</div>
+            <div class="empty-desc">Multi-stage persistence across temporal windows required before promoting live incidents.</div>
           </div>
         `;
       } else {
-        const topInc = this.incidents[0];
+        const topInc = liveIncidents[0];
         incPreview.innerHTML = `
           <div class="incident-card" style="box-shadow:none; padding:16px; border:1px solid #E2E8F0;">
             <div class="incident-card-top" style="margin-bottom:10px; padding-bottom:8px;">
@@ -863,17 +1150,25 @@ class DiodeSentinelApp {
     // 5. Recent Threat Stream Preview
     const streamContainer = document.getElementById('overviewThreatStream');
     if (streamContainer) {
-      if (this.alerts.length === 0) {
+      if (!this.apiConnected) {
         streamContainer.innerHTML = `
           <div class="empty-state-box">
-            <div class="empty-icon">📡</div>
-            <div class="empty-title">Awaiting Live Alert Stream</div>
-            <div class="empty-desc">Promoted alert records will appear here as packets stream through the feature engine.</div>
+            <div class="empty-icon">⚠️</div>
+            <div class="empty-title">BACKEND OFFLINE</div>
+            <div class="empty-desc">Live telemetry unavailable. Check API endpoint connection.</div>
+          </div>
+        `;
+      } else if (liveAlerts.length === 0) {
+        streamContainer.innerHTML = `
+          <div class="empty-state-box">
+            <div class="empty-icon">🛡️</div>
+            <div class="empty-title">NO LIVE DATA</div>
+            <div class="empty-desc">No live NIC capture events recorded. Demo replay sessions are segregated and visible in the Demo Testing console.</div>
           </div>
         `;
       } else {
         streamContainer.innerHTML = '';
-        const recent = this.alerts.slice(0, 4);
+        const recent = liveAlerts.slice(0, 4);
         recent.forEach(alert => {
           const item = document.createElement('div');
           item.className = 'threat-preview-item';
@@ -896,19 +1191,44 @@ class DiodeSentinelApp {
 
   // PAGE 2: LIVE THREATS
   renderThreats() {
+    const liveAlerts = this.getLiveAlerts();
     const filter = this.activeThreatFilter;
     const filtered = filter === 'ALL' 
-      ? this.alerts 
-      : this.alerts.filter(a => a.threat_class === filter);
+      ? liveAlerts 
+      : liveAlerts.filter(a => a.threat_class === filter);
 
     const visCountEl = document.getElementById('visibleThreatCount');
-    if (visCountEl) visCountEl.textContent = filtered.length;
+    if (visCountEl) visCountEl.textContent = !this.apiConnected ? '--' : filtered.length;
 
     // Desktop Table
     const tbody = document.getElementById('threatsTableBody');
     if (tbody) {
       tbody.innerHTML = '';
-      if (filtered.length === 0) {
+      if (!this.apiConnected) {
+        tbody.innerHTML = `
+          <tr>
+            <td colspan="8" class="table-empty-cell">
+              <div class="empty-state-box">
+                <div class="empty-icon">⚠️</div>
+                <div class="empty-title">BACKEND OFFLINE</div>
+                <div class="empty-desc">Live telemetry unavailable. Cannot reach backend API.</div>
+              </div>
+            </td>
+          </tr>
+        `;
+      } else if (liveAlerts.length === 0) {
+        tbody.innerHTML = `
+          <tr>
+            <td colspan="8" class="table-empty-cell">
+              <div class="empty-state-box">
+                <div class="empty-icon">🛡️</div>
+                <div class="empty-title">NO LIVE DATA</div>
+                <div class="empty-desc">Live NIC monitor is not currently capturing packets. Use Demo Testing for offline PCAP replay or start Live Capture above if an authorized interface is available.</div>
+              </div>
+            </td>
+          </tr>
+        `;
+      } else if (filtered.length === 0) {
         tbody.innerHTML = `
           <tr>
             <td colspan="8" class="table-empty-cell">
@@ -932,7 +1252,7 @@ class DiodeSentinelApp {
             <td class="mono-cell">${alert.src_ip || '--'}</td>
             <td class="mono-cell">${alert.dst_ip || '--'}</td>
             <td class="mono-cell">${port}</td>
-            <td><strong>${Math.round((alert.confidence_score || 0.9) * 100)}%</strong></td>
+            <td><strong>${Math.round((alert.confidence_score !== undefined ? alert.confidence_score : 0.9) * 100)}%</strong></td>
             <td class="evidence-cell" title="${this.escapeHtml(alert.supporting_evidence || '')}">${this.escapeHtml(alert.supporting_evidence || 'Baseline criteria met.')}</td>
             <td style="text-align: right;" class="mono-cell">${timeFormatted}</td>
           `;
@@ -946,7 +1266,23 @@ class DiodeSentinelApp {
     const mobContainer = document.getElementById('threatsMobileList');
     if (mobContainer) {
       mobContainer.innerHTML = '';
-      if (filtered.length === 0) {
+      if (!this.apiConnected) {
+        mobContainer.innerHTML = `
+          <div class="empty-state-box">
+            <div class="empty-icon">⚠️</div>
+            <div class="empty-title">BACKEND OFFLINE</div>
+            <div class="empty-desc">Live telemetry unavailable. Cannot reach backend API.</div>
+          </div>
+        `;
+      } else if (liveAlerts.length === 0) {
+        mobContainer.innerHTML = `
+          <div class="empty-state-box">
+            <div class="empty-icon">🛡️</div>
+            <div class="empty-title">NO LIVE DATA</div>
+            <div class="empty-desc">No live NIC capture events recorded. Demo replay sessions are segregated in Demo Testing.</div>
+          </div>
+        `;
+      } else if (filtered.length === 0) {
         mobContainer.innerHTML = `
           <div class="empty-state-box">
             <div class="empty-icon">🛡️</div>
@@ -972,7 +1308,7 @@ class DiodeSentinelApp {
               <span>${alert.dst_ip || '0.0.0.0'}</span>
             </div>
             <div class="mob-card-meta">
-              <span>Confidence: <strong>${Math.round((alert.confidence_score || 0.9) * 100)}%</strong></span>
+              <span>Confidence: <strong>${Math.round((alert.confidence_score !== undefined ? alert.confidence_score : 0.9) * 100)}%</strong></span>
               <span>Signals: <strong>${alert.corroboration_count || 1}</strong></span>
               <span>Window: <strong>${alert.persistence_windows || 1}/3</strong></span>
             </div>
@@ -991,18 +1327,30 @@ class DiodeSentinelApp {
     if (!container) return;
 
     container.innerHTML = '';
-    if (this.incidents.length === 0) {
+    if (!this.apiConnected) {
       container.innerHTML = `
         <div class="empty-state-box">
-          <div class="empty-icon">🔗</div>
-          <div class="empty-title">No Correlated Attack Chains Active</div>
-          <div class="empty-desc">The Correlation Engine correlates alerts across sliding windows. When an attacker progresses through multiple stages (e.g. reconnaissance followed by C2 channel and exfiltration), an incident is generated here.</div>
+          <div class="empty-icon">⚠️</div>
+          <div class="empty-title">BACKEND OFFLINE</div>
+          <div class="empty-desc">Live attack chains unavailable. Cannot reach backend API.</div>
         </div>
       `;
       return;
     }
 
-    this.incidents.forEach(inc => {
+    const liveIncidents = this.getLiveIncidents();
+    if (liveIncidents.length === 0) {
+      container.innerHTML = `
+        <div class="empty-state-box">
+          <div class="empty-icon">🔗</div>
+          <div class="empty-title">No Correlated Live Attack Chains Active</div>
+          <div class="empty-desc">The Correlation Engine correlates live alerts across sliding windows. When an attacker progresses through multiple stages (e.g. reconnaissance followed by C2 channel and exfiltration), an incident is generated here.</div>
+        </div>
+      `;
+      return;
+    }
+
+    liveIncidents.forEach(inc => {
       const card = document.createElement('div');
       card.className = 'incident-card';
 
@@ -1335,19 +1683,26 @@ class DiodeSentinelApp {
 
   getSeverityClass(alert) {
     const tc = (alert.threat_class || '').toLowerCase();
+    const conf = alert.confidence_score !== undefined && alert.confidence_score !== null ? alert.confidence_score : 0.8;
+    
+    // Critical: High-consequence threats (C2 Beaconing, DDoS, Exfiltration) with solid confidence (>= 0.70)
     if (tc.includes('c2') || tc.includes('ddos') || tc.includes('exfil')) {
-      return 'critical';
-    } else if (tc.includes('port') || tc.includes('dga') || tc.includes('malware')) {
-      return 'high';
+      return conf >= 0.70 ? 'critical' : 'high';
+    }
+    // High: Reconnaissance (Port Scanning), DGA Tunnelling, Malware with high confidence (>= 0.75)
+    if (tc.includes('port') || tc.includes('dga') || tc.includes('malware')) {
+      return conf >= 0.75 ? 'high' : 'medium';
+    }
+    // Low: Low confidence anomaly events (< 0.60)
+    if (conf < 0.60) {
+      return 'low';
     }
     return 'medium';
   }
 
   getSeverityLabel(alert) {
     const cls = this.getSeverityClass(alert);
-    if (cls === 'critical') return 'CRITICAL';
-    if (cls === 'high') return 'HIGH';
-    return 'MEDIUM';
+    return cls.toUpperCase();
   }
 
   extractPort(flowId) {

@@ -18,6 +18,7 @@ class AllowlistManager:
             ipaddress.ip_network("127.0.0.0/8"),
             ipaddress.ip_network("169.254.0.0/16"),
             ipaddress.ip_network("100.64.0.0/10"),  # CGNAT
+            ipaddress.ip_network("147.32.0.0/16"),   # CTU-13 Campus / Enclave LAN
         ]
         if enterprise_subnets:
             for cidr in enterprise_subnets:

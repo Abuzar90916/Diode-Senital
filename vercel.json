@@ -1,7 +1,49 @@
 {
   "version": 2,
-  "cleanUrls": true,
+  "cleanUrls": false,
+  "headers": [
+    {
+      "source": "/dashboard/static/(.*)\\.css",
+      "headers": [
+        {
+          "key": "Content-Type",
+          "value": "text/css; charset=utf-8"
+        }
+      ]
+    },
+    {
+      "source": "/dashboard/static/(.*)\\.js",
+      "headers": [
+        {
+          "key": "Content-Type",
+          "value": "application/javascript; charset=utf-8"
+        }
+      ]
+    },
+    {
+      "source": "/static/(.*)\\.css",
+      "headers": [
+        {
+          "key": "Content-Type",
+          "value": "text/css; charset=utf-8"
+        }
+      ]
+    },
+    {
+      "source": "/static/(.*)\\.js",
+      "headers": [
+        {
+          "key": "Content-Type",
+          "value": "application/javascript; charset=utf-8"
+        }
+      ]
+    }
+  ],
   "rewrites": [
+    {
+      "source": "/dashboard/static/(.*)",
+      "destination": "/dashboard/static/$1"
+    },
     {
       "source": "/static/(.*)",
       "destination": "/dashboard/static/$1"

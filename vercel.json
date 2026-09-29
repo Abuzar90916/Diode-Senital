@@ -3,7 +3,7 @@
   "cleanUrls": false,
   "headers": [
     {
-      "source": "/dashboard/static/(.*)\\.css",
+      "source": "/(.*)\\.css",
       "headers": [
         {
           "key": "Content-Type",
@@ -12,25 +12,7 @@
       ]
     },
     {
-      "source": "/dashboard/static/(.*)\\.js",
-      "headers": [
-        {
-          "key": "Content-Type",
-          "value": "application/javascript; charset=utf-8"
-        }
-      ]
-    },
-    {
-      "source": "/static/(.*)\\.css",
-      "headers": [
-        {
-          "key": "Content-Type",
-          "value": "text/css; charset=utf-8"
-        }
-      ]
-    },
-    {
-      "source": "/static/(.*)\\.js",
+      "source": "/(.*)\\.js",
       "headers": [
         {
           "key": "Content-Type",
@@ -41,24 +23,20 @@
   ],
   "rewrites": [
     {
-      "source": "/dashboard/static/(.*)",
-      "destination": "/dashboard/static/$1"
-    },
-    {
-      "source": "/static/(.*)",
-      "destination": "/dashboard/static/$1"
-    },
-    {
-      "source": "/dashboard/(.*)",
-      "destination": "/dashboard/static/index.html"
+      "source": "/dashboard/(overview|threats|incidents|flows|engine|demo|system)(/.*)?",
+      "destination": "/index.html"
     },
     {
       "source": "/dashboard",
-      "destination": "/dashboard/static/index.html"
+      "destination": "/index.html"
+    },
+    {
+      "source": "/dashboard/",
+      "destination": "/index.html"
     },
     {
       "source": "/",
-      "destination": "/dashboard/static/index.html"
+      "destination": "/index.html"
     }
   ]
 }

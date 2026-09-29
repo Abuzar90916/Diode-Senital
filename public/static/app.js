@@ -99,6 +99,7 @@ class DiodeSentinelApp {
     this.isLiveRunning = false;
     this.demoPollingTimer = null;
     this.eventSource = null;
+    this.lastCompletedDemo = null;
 
     // Initialize application
     this.initElements();
@@ -238,6 +239,7 @@ class DiodeSentinelApp {
     } else if (route === '/dashboard/demo') {
       this.loadDemoScenarios();
       this.checkRuntimeStatus();
+      this.loadLastDemoResult();
     } else if (route === '/dashboard/system') {
       this.loadComplianceAudit();
     } else if (route === '/dashboard/overview') {
@@ -494,6 +496,20 @@ class DiodeSentinelApp {
           this.handleIncomingIncident(incData);
         } catch (err) {
           console.warn('SSE incident parse error:', err);
+        }
+      });
+
+      this.eventSource.addEventListener('demo_completed', (e) => {
+        try {
+          const data = JSON.parse(e.data);
+          if (data) {
+            this.lastCompletedDemo = data;
+            if (!this.isDemoRunning) {
+              this.renderDemoConsoleResult(this.lastCompletedDemo);
+            }
+          }
+        } catch (err) {
+          console.warn('SSE demo_completed parse error:', err);
         }
       });
 
@@ -948,10 +964,78 @@ class DiodeSentinelApp {
     }
   }
 
+  async loadLastDemoResult() {
+    try {
+      const res = await fetch(this.apiUrl('/api/demo/last_result'));
+      if (res.ok) {
+        const data = await res.json();
+        if (data && data.last_demo_result) {
+          this.lastCompletedDemo = data.last_demo_result;
+          if (!this.isDemoRunning) {
+            this.renderDemoConsoleResult(this.lastCompletedDemo);
+          }
+        }
+      }
+    } catch (err) {
+      console.warn('Failed to fetch last demo result:', err);
+    }
+  }
+
+  renderDemoConsoleResult(demoResult) {
+    if (!demoResult) return;
+    const summary = demoResult.summary || {};
+    const pcapName = (demoResult.pcap || '').split(/[\\/]/).pop() || 'None selected';
+    const sessionId = demoResult.session_id || 'DEMO-COMPLETED';
+
+    const badge = document.getElementById('demoEngineStatusBadge');
+    if (badge) {
+      if (demoResult.error) {
+        badge.textContent = 'ERROR';
+        badge.className = 'console-badge error';
+      } else {
+        badge.textContent = 'COMPLETED';
+        badge.className = 'console-badge';
+      }
+    }
+
+    const sessionEl = document.getElementById('demoSessionId');
+    if (sessionEl) sessionEl.textContent = sessionId;
+
+    const pActive = document.getElementById('demoActivePcap');
+    if (pActive) pActive.textContent = pcapName;
+
+    const pParsed = document.getElementById('demoPacketsParsed');
+    if (pParsed) pParsed.textContent = (summary.packets !== undefined ? summary.packets : 0).toLocaleString();
+
+    const fEmitted = document.getElementById('demoFlowsEmitted');
+    if (fEmitted) fEmitted.textContent = (summary.records !== undefined ? summary.records : 0).toLocaleString();
+
+    const aEmitted = document.getElementById('demoAlertsEmitted');
+    if (aEmitted) aEmitted.textContent = (summary.alerts !== undefined ? summary.alerts : 0).toLocaleString();
+
+    const eTime = document.getElementById('demoElapsedTime');
+    if (eTime) eTime.textContent = `${(summary.elapsed_sec || 0).toFixed(1)}s`;
+
+    const msg = document.getElementById('demoActionMsg');
+    if (msg) {
+      if (demoResult.error) {
+        msg.textContent = `Pipeline halted: ${demoResult.error}`;
+      } else {
+        const pkts = (summary.packets || 0).toLocaleString();
+        const recs = (summary.records || 0).toLocaleString();
+        const alts = (summary.alerts || 0).toLocaleString();
+        const elap = (summary.elapsed_sec || 0).toFixed(2);
+        msg.textContent = `Scenario complete: ${pkts} packets parsed into ${recs} flow feature records with ${alts} alerts promoted in ${elap}s. Zero egress verified.`;
+      }
+    }
+  }
+
   async runDemoScenario(pcapPath, triggerButton) {
     if (this.isDemoRunning) return;
 
     this.isDemoRunning = true;
+    const pcapBase = pcapPath.split(/[\\/]/).pop();
+
     if (triggerButton) {
       triggerButton.disabled = true;
       triggerButton.innerHTML = '<span>⏳</span> INGESTING...';
@@ -963,9 +1047,25 @@ class DiodeSentinelApp {
       badge.className = 'console-badge running';
     }
 
+    const pActive = document.getElementById('demoActivePcap');
+    if (pActive) pActive.textContent = pcapBase;
+
+    const sessionEl = document.getElementById('demoSessionId');
+    if (sessionEl) sessionEl.textContent = 'DEMO-INITIALIZING...';
+
+    // Clear in-flight counters for clean run
+    const pParsed = document.getElementById('demoPacketsParsed');
+    if (pParsed) pParsed.textContent = '0';
+    const fEmitted = document.getElementById('demoFlowsEmitted');
+    if (fEmitted) fEmitted.textContent = '0';
+    const aEmitted = document.getElementById('demoAlertsEmitted');
+    if (aEmitted) aEmitted.textContent = '0';
+    const eTime = document.getElementById('demoElapsedTime');
+    if (eTime) eTime.textContent = '0.0s';
+
     const msg = document.getElementById('demoActionMsg');
     if (msg) {
-      msg.textContent = `Streaming PCAP "${pcapPath}" into passive ingestion pipeline with zero-egress hardware compliance watchdog active...`;
+      msg.textContent = `Streaming PCAP "${pcapBase}" into passive ingestion pipeline with zero-egress hardware compliance watchdog active...`;
     }
 
     try {
@@ -975,7 +1075,14 @@ class DiodeSentinelApp {
         body: JSON.stringify({ pcap: pcapPath, mode: 'demo', source: 'DEMO' })
       });
       
-      await res.json();
+      const startData = await res.json();
+      if (startData && startData.session_id) {
+        this.runtimeSessionId = startData.session_id;
+        if (sessionEl) sessionEl.textContent = startData.session_id;
+      }
+      if (startData && (startData.active_pcap || startData.pcap)) {
+        if (pActive) pActive.textContent = (startData.active_pcap || startData.pcap).split(/[\\/]/).pop();
+      }
       
       // Start polling runtime until complete
       if (this.demoPollingTimer) clearInterval(this.demoPollingTimer);
@@ -985,7 +1092,18 @@ class DiodeSentinelApp {
           const stRes = await fetch(this.apiUrl('/api/runtime/status'));
           if (stRes.ok) {
             const st = await stRes.json();
-            this.updateRuntimeUI(st);
+            
+            // Live updates during execution
+            if (st.session_id && sessionEl) sessionEl.textContent = st.session_id;
+            if ((st.active_pcap || st.pcap) && pActive) {
+              pActive.textContent = (st.active_pcap || st.pcap).split(/[\\/]/).pop();
+            }
+
+            const currentSummary = st.summary || (st.last_demo_result ? st.last_demo_result.summary : {});
+            if (pParsed && currentSummary.packets !== undefined) pParsed.textContent = currentSummary.packets.toLocaleString();
+            if (fEmitted && currentSummary.records !== undefined) fEmitted.textContent = currentSummary.records.toLocaleString();
+            if (aEmitted && currentSummary.alerts !== undefined) aEmitted.textContent = currentSummary.alerts.toLocaleString();
+            if (eTime && currentSummary.elapsed_sec !== undefined) eTime.textContent = `${currentSummary.elapsed_sec.toFixed(1)}s`;
 
             if (!st.running) {
               clearInterval(this.demoPollingTimer);
@@ -994,14 +1112,38 @@ class DiodeSentinelApp {
                 triggerButton.disabled = false;
                 triggerButton.innerHTML = '<span>▶</span> RUN TEST';
               }
-              if (badge) {
-                badge.textContent = 'COMPLETED';
-                badge.className = 'console-badge';
+
+              const err = st.last_error || (st.last_demo_result ? st.last_demo_result.error : null);
+              const finalSummary = (st.summary && st.summary.packets !== undefined)
+                ? st.summary
+                : (st.last_demo_result ? st.last_demo_result.summary : currentSummary);
+
+              if (err) {
+                if (badge) {
+                  badge.textContent = 'ERROR';
+                  badge.className = 'console-badge error';
+                }
+                if (msg) msg.textContent = 'Pipeline execution failed: ' + err;
+                this.lastCompletedDemo = {
+                  session_id: st.session_id || 'DEMO-ERROR',
+                  pcap: pcapPath,
+                  summary: finalSummary,
+                  error: err
+                };
+              } else {
+                if (badge) {
+                  badge.textContent = 'COMPLETED';
+                  badge.className = 'console-badge';
+                }
+                this.lastCompletedDemo = {
+                  session_id: st.session_id || this.runtimeSessionId || 'DEMO-COMPLETE',
+                  pcap: pcapPath,
+                  summary: finalSummary,
+                  error: null
+                };
+                this.renderDemoConsoleResult(this.lastCompletedDemo);
               }
-              if (msg) {
-                const s = st.summary || {};
-                msg.textContent = `Scenario complete: ${s.packets || 0} packets parsed into ${s.records || 0} flow feature records with ${s.alerts || 0} alerts promoted in ${(s.elapsed_sec || 0).toFixed(2)}s. Zero egress verified.`;
-              }
+
               // Refresh data
               this.loadAlerts();
               this.loadIncidents();
@@ -1021,7 +1163,7 @@ class DiodeSentinelApp {
       }
       if (badge) {
         badge.textContent = 'ERROR';
-        badge.className = 'console-badge';
+        badge.className = 'console-badge error';
       }
       if (msg) msg.textContent = 'Pipeline execution failed: ' + err.message;
     }
@@ -1104,28 +1246,39 @@ class DiodeSentinelApp {
       this.runtimeStatus = status;
     }
 
-    const summary = st.summary || {};
-
-    const pActive = document.getElementById('demoActivePcap');
-    if (pActive && st.pcap) {
-      pActive.textContent = st.pcap.split(/[\\/]/).pop();
+    // Preserve last_demo_result from backend if available and not actively running
+    if (st.last_demo_result && !this.isDemoRunning) {
+      this.lastCompletedDemo = st.last_demo_result;
     }
 
-    const pParsed = document.getElementById('demoPacketsParsed');
-    if (pParsed) pParsed.textContent = (summary.packets || 0).toLocaleString();
-
-    const fEmitted = document.getElementById('demoFlowsEmitted');
-    if (fEmitted) fEmitted.textContent = (summary.records || 0).toLocaleString();
-
-    const aEmitted = document.getElementById('demoAlertsEmitted');
-    if (aEmitted) aEmitted.textContent = (summary.alerts || 0).toLocaleString();
-
-    const eTime = document.getElementById('demoElapsedTime');
-    if (eTime) eTime.textContent = `${(summary.elapsed_sec || 0).toFixed(1)}s`;
+    if (this.isDemoRunning) {
+      const summary = st.summary || {};
+      const pActive = document.getElementById('demoActivePcap');
+      const pcapVal = st.active_pcap || st.pcap;
+      if (pActive && pcapVal) {
+        pActive.textContent = pcapVal.split(/[\\/]/).pop();
+      }
+      const sessionEl = document.getElementById('demoSessionId');
+      if (sessionEl && st.session_id) {
+        sessionEl.textContent = st.session_id;
+      }
+      const pParsed = document.getElementById('demoPacketsParsed');
+      if (pParsed && summary.packets !== undefined) pParsed.textContent = summary.packets.toLocaleString();
+      const fEmitted = document.getElementById('demoFlowsEmitted');
+      if (fEmitted && summary.records !== undefined) fEmitted.textContent = summary.records.toLocaleString();
+      const aEmitted = document.getElementById('demoAlertsEmitted');
+      if (aEmitted && summary.alerts !== undefined) aEmitted.textContent = summary.alerts.toLocaleString();
+      const eTime = document.getElementById('demoElapsedTime');
+      if (eTime && summary.elapsed_sec !== undefined) eTime.textContent = `${summary.elapsed_sec.toFixed(1)}s`;
+    } else if (this.lastCompletedDemo) {
+      // Retain last completed demo result! Never overwrite with 0!
+      this.renderDemoConsoleResult(this.lastCompletedDemo);
+    }
 
     // Overview inferences
     const kpiInferences = document.getElementById('kpiAiInferences');
     if (kpiInferences) {
+      const summary = (this.lastCompletedDemo && this.lastCompletedDemo.summary) || st.summary || {};
       if (summary.packets) {
         kpiInferences.textContent = summary.packets.toLocaleString();
       } else if (this.alerts.length > 0) {

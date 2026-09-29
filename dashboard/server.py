@@ -132,6 +132,7 @@ class RuntimeController:
         self.stop_event: Optional[threading.Event] = None
         self.last_error: Optional[str] = None
         self.last_summary: Dict[str, Any] = {}
+        self.last_demo_result: Optional[Dict[str, Any]] = None
         self.lock = threading.Lock()
 
     def _publish(self, event: Dict[str, Any]) -> None:
@@ -150,14 +151,23 @@ class RuntimeController:
                 return self.status()
             if not pcap and not interface:
                 raise ValueError("A PCAP path or capture interface is required for runtime start")
+            
+            # Robust PCAP path resolution: check relative to BASE_DIR if not found in cwd
+            resolved_pcap = pcap
+            if resolved_pcap and not os.path.isabs(resolved_pcap):
+                if not os.path.exists(resolved_pcap):
+                    candidate = os.path.join(BASE_DIR, resolved_pcap)
+                    if os.path.exists(candidate):
+                        resolved_pcap = candidate
+
             self.events = []
             self.last_error = None
             self.last_summary = {}
             self.stop_event = threading.Event()
-            if pcap:
+            if resolved_pcap:
                 self.source = "DEMO"
                 self.session_id = f"DEMO-{uuid.uuid4().hex[:8].upper()}"
-                self.active_pcap = pcap
+                self.active_pcap = resolved_pcap
                 self.active_interface = None
             else:
                 self.source = "LIVE"
@@ -167,6 +177,8 @@ class RuntimeController:
             self.running = True
 
         stop_ev = self.stop_event
+        pcap_to_run = self.active_pcap
+        iface_to_run = self.active_interface
 
         def worker():
             try:
@@ -177,8 +189,8 @@ class RuntimeController:
                         f"Live capture & threat detection pipeline requires ML dependencies: {imp_err}"
                     )
                 self.last_summary = run_pipeline(
-                    pcap_path=pcap,
-                    interface=interface,
+                    pcap_path=pcap_to_run,
+                    interface=iface_to_run,
                     output_records_file=None,
                     output_alerts_file=None,
                     event_callback=self._publish,
@@ -192,6 +204,19 @@ class RuntimeController:
             finally:
                 with self.lock:
                     self.running = False
+                    if self.source == "DEMO":
+                        self.last_demo_result = {
+                            "session_id": self.session_id,
+                            "pcap": self.active_pcap,
+                            "summary": dict(self.last_summary or {}),
+                            "error": self.last_error,
+                            "completed_at": datetime.now(timezone.utc).isoformat(),
+                        }
+                if self.source == "DEMO" and self.last_demo_result:
+                    self._publish({
+                        "type": "DEMO_COMPLETED",
+                        "data": dict(self.last_demo_result),
+                    })
 
         self.thread = threading.Thread(target=worker, daemon=True, name="diode-sentinel-runtime")
         self.thread.start()
@@ -211,16 +236,24 @@ class RuntimeController:
 
     def status(self) -> Dict[str, Any]:
         with self.lock:
+            summary = self.last_summary
+            if not summary and self.last_demo_result:
+                summary = self.last_demo_result.get("summary", {})
+            active_pcap = self.active_pcap or (self.last_demo_result.get("pcap") if self.last_demo_result else None)
+            session_id = self.session_id or (self.last_demo_result.get("session_id") if self.last_demo_result else None)
+
             return {
                 "mode": "live" if self.source == "LIVE" else ("demo" if self.source == "DEMO" else "idle"),
                 "source": self.source,
-                "session_id": self.session_id,
-                "active_pcap": self.active_pcap,
+                "session_id": session_id,
+                "active_pcap": active_pcap,
+                "pcap": active_pcap,
                 "active_interface": self.active_interface,
                 "running": self.running,
                 "events_buffered": len(self.events),
                 "last_error": self.last_error,
-                "summary": self.last_summary,
+                "summary": summary,
+                "last_demo_result": self.last_demo_result,
             }
 
     def snapshot(self, event_type: Optional[str] = None) -> List[Dict[str, Any]]:
@@ -313,6 +346,15 @@ async def get_interfaces():
 @app.get("/api/runtime/status")
 async def get_runtime_status():
     return runtime_controller.status()
+
+
+@app.get("/api/demo/last_result")
+async def get_last_demo_result():
+    """Returns the most recent completed Demo PCAP test execution result."""
+    res = runtime_controller.last_demo_result
+    if res is None:
+        return {"status": "none", "last_demo_result": None}
+    return {"status": "available", "last_demo_result": res}
 
 
 @app.get("/api/demo/scenarios")

@@ -505,6 +505,7 @@ class DiodeSentinelApp {
     this.loadTelemetry();
     this.loadAlerts();
     this.loadIncidents();
+    this.loadFlows();
     this.loadComplianceAudit();
 
     // Periodically update telemetry & runtime status
@@ -1603,11 +1604,15 @@ class DiodeSentinelApp {
     // Overview inferences
     const kpiInferences = document.getElementById('kpiAiInferences');
     if (kpiInferences) {
-      const summary = (this.lastCompletedDemo && this.lastCompletedDemo.summary) || st.summary || {};
+      const summary = (this.lastCompletedBackendTest && this.lastCompletedBackendTest.summary) ||
+                      (this.lastCompletedDemo && this.lastCompletedDemo.summary) ||
+                      (st && st.summary) || {};
       if (summary.packets) {
         kpiInferences.textContent = summary.packets.toLocaleString();
       } else if (this.alerts.length > 0) {
         kpiInferences.textContent = (this.alerts.length * 3).toLocaleString();
+      } else if (this.apiConnected) {
+        kpiInferences.textContent = '0';
       } else {
         kpiInferences.textContent = '--';
       }
@@ -1628,29 +1633,43 @@ class DiodeSentinelApp {
     // 1. KPI Cards
     const kpiThreats = document.getElementById('kpiActiveThreats');
     if (kpiThreats) {
-      if (!this.apiConnected) {
-        kpiThreats.textContent = '--';
-      } else if (liveAlerts.length > 0) {
-        kpiThreats.textContent = liveAlerts.length.toLocaleString();
-      } else {
-        kpiThreats.textContent = '--';
-      }
+      kpiThreats.textContent = !this.apiConnected ? '--' : liveAlerts.length.toLocaleString();
+    }
+    const kpiThreatsNote = document.getElementById('kpiThreatsNote');
+    if (kpiThreatsNote) {
+      kpiThreatsNote.textContent = liveAlerts.length > 0
+        ? `${liveAlerts.length.toLocaleString()} corroborated alerts`
+        : 'Awaiting stream ingestion';
     }
 
     const kpiChains = document.getElementById('kpiAttackChains');
     if (kpiChains) {
-      if (!this.apiConnected) {
-        kpiChains.textContent = '--';
-      } else if (liveIncidents.length > 0) {
-        kpiChains.textContent = liveIncidents.length.toLocaleString();
-      } else {
-        kpiChains.textContent = '--';
-      }
+      kpiChains.textContent = !this.apiConnected ? '--' : liveIncidents.length.toLocaleString();
+    }
+    const kpiChainsNote = document.getElementById('kpiChainsNote');
+    if (kpiChainsNote) {
+      kpiChainsNote.textContent = liveIncidents.length > 0
+        ? `${liveIncidents.length.toLocaleString()} active chains`
+        : 'Multi-stage corroboration';
     }
 
     const kpiFlows = document.getElementById('kpiFlowsParsed');
     if (kpiFlows) {
-      kpiFlows.textContent = !this.apiConnected ? '--' : (this.flows.length > 0 ? this.flows.length.toLocaleString() : '--');
+      if (!this.apiConnected) {
+        kpiFlows.textContent = '--';
+      } else if (this.flows.length > 0) {
+        kpiFlows.textContent = this.flows.length.toLocaleString();
+      } else {
+        const st = this.runtimeStatus;
+        const summary = (this.lastCompletedBackendTest && this.lastCompletedBackendTest.summary) ||
+                        (this.lastCompletedDemo && this.lastCompletedDemo.summary) ||
+                        (st && st.summary) || {};
+        if (summary.records !== undefined && summary.records > 0) {
+          kpiFlows.textContent = summary.records.toLocaleString();
+        } else {
+          kpiFlows.textContent = '0';
+        }
+      }
     }
 
     // 2. Threat Activity Distribution Chart (Temporal Histogram)

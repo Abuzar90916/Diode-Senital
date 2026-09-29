@@ -82,13 +82,28 @@ class DiodeComplianceWatchdog:
             proc = psutil.Process()
             # In Windows/Linux, inspect open connections
             connections = proc.net_connections(kind="inet")
+
+            # Identify listening server ports (e.g., Uvicorn web server listening on PORT / 8000)
+            listening_ports = {
+                conn.laddr.port for conn in connections
+                if conn.status == "LISTEN" and conn.laddr and hasattr(conn.laddr, "port")
+            }
+            env_port = os.environ.get("PORT")
+            if env_port and env_port.isdigit():
+                listening_ports.add(int(env_port))
+
             for conn in connections:
                 # If a socket has a remote address (raddr) that is not loopback
                 if conn.raddr and conn.status in ("ESTABLISHED", "SYN_SENT", "LAST_ACK"):
-                    r_ip = conn.raddr.ip
+                    # Inbound client connections accepted on the server's listening port are not outbound leaks
+                    if conn.laddr and hasattr(conn.laddr, "port") and conn.laddr.port in listening_ports:
+                        continue
+
+                    r_ip = getattr(conn.raddr, "ip", None) or (conn.raddr[0] if isinstance(conn.raddr, tuple) else "")
                     if not (r_ip.startswith("127.") or r_ip == "::1"):
+                        r_port = getattr(conn.raddr, "port", None) or (conn.raddr[1] if isinstance(conn.raddr, tuple) and len(conn.raddr) > 1 else "")
                         violations.append(
-                            f"Illegal outbound socket detected to {conn.raddr.ip}:{conn.raddr.port} (status: {conn.status})"
+                            f"Illegal outbound socket detected to {r_ip}:{r_port} (status: {conn.status})"
                         )
         except (psutil.AccessDenied, psutil.NoSuchProcess):
             pass

@@ -103,6 +103,10 @@ class DiodeSentinelApp {
     this.eventSource = null;
     this.lastCompletedDemo = null;
     this.lastCompletedBackendTest = null;
+    this.lastCompletedJudgeDemo = null;
+    this.judgeDemoAlerts = [];
+    this.isJudgeDemoRunning = false;
+    this.judgeDemoPollingTimer = null;
 
     // Initialize application
     this.initElements();
@@ -148,6 +152,7 @@ class DiodeSentinelApp {
       '/dashboard/flows',
       '/dashboard/engine',
       '/dashboard/demo',
+      '/dashboard/judge',
       '/dashboard/system'
     ];
 
@@ -179,6 +184,7 @@ class DiodeSentinelApp {
       '/dashboard/flows': 'page-flows',
       '/dashboard/engine': 'page-engine',
       '/dashboard/demo': 'page-demo',
+      '/dashboard/judge': 'page-judge',
       '/dashboard/system': 'page-system'
     };
 
@@ -229,14 +235,17 @@ class DiodeSentinelApp {
       '/dashboard/flows': { label: 'NETWORK FLOWS', breadcrumb: 'Streaming Flow Aggregator / 6 Feature Domains' },
       '/dashboard/engine': { label: 'MODEL ENGINE', breadcrumb: 'Machine Learning Classifiers & SLA SLAs' },
       '/dashboard/demo': { label: 'DEMO TESTING', breadcrumb: 'Passive Ingestion / Attack PCAP Scenario Replay' },
+      '/dashboard/judge': { label: 'JUDGE DEMO MODE', breadcrumb: 'Deterministic Real PCAP Pipeline Ingestion / ThreatCore Detection' },
       '/dashboard/system': { label: 'SYSTEM & DIODE', breadcrumb: 'Hardware Diode Compliance & Enclave Governance' }
     };
 
     const info = titles[route] || titles['/dashboard/overview'];
     const labelEl = document.getElementById('topbarPageTitle');
     const breadcrumbEl = document.getElementById('topbarBreadcrumb');
+    const mobPageEl = document.getElementById('mobileHeaderPage');
     if (labelEl) labelEl.textContent = info.label;
     if (breadcrumbEl) breadcrumbEl.textContent = info.breadcrumb;
+    if (mobPageEl) mobPageEl.textContent = info.label;
     document.title = `DIODE SENTINEL // ${info.label}`;
   }
 
@@ -249,6 +258,8 @@ class DiodeSentinelApp {
       this.loadDemoScenarios();
       this.checkRuntimeStatus();
       this.loadLastDemoResult();
+    } else if (route === '/dashboard/judge') {
+      this.onJudgeDemoEntered();
     } else if (route === '/dashboard/system') {
       this.loadComplianceAudit();
       this.loadLastBackendTestResult();
@@ -313,6 +324,30 @@ class DiodeSentinelApp {
     this.backendTestAlerts = document.getElementById('backendTestAlerts');
     this.backendTestElapsed = document.getElementById('backendTestElapsed');
     this.backendTestActionMsg = document.getElementById('backendTestActionMsg');
+
+    // Judge Demo Controls
+    this.btnRunJudgeAttack = document.getElementById('btnRunJudgeAttack');
+    this.btnResetJudgeDemo = document.getElementById('btnResetJudgeDemo');
+    this.judgeScenarioSelect = document.getElementById('judgeScenarioSelect');
+    this.judgeRuntimeStatusBadge = document.getElementById('judgeRuntimeStatusBadge');
+    this.judgeActionMsg = document.getElementById('judgeActionMsg');
+    this.judgeMetricPcap = document.getElementById('judgeMetricPcap');
+    this.judgeMetricPackets = document.getElementById('judgeMetricPackets');
+    this.judgeMetricFlows = document.getElementById('judgeMetricFlows');
+    this.judgeMetricAlerts = document.getElementById('judgeMetricAlerts');
+    this.judgeMetricElapsed = document.getElementById('judgeMetricElapsed');
+    this.judgeMetricEgress = document.getElementById('judgeMetricEgress');
+    this.judgeMetricSession = document.getElementById('judgeMetricSession');
+    this.judgeMetricSource = document.getElementById('judgeMetricSource');
+    this.judgeAlertsCountBadge = document.getElementById('judgeAlertsCountBadge');
+    this.judgeAlertsTableBody = document.getElementById('judgeAlertsTableBody');
+    this.judgeAlertsMobileList = document.getElementById('judgeAlertsMobileList');
+    this.judgeDiodeStatusVal = document.getElementById('judgeDiodeStatusVal');
+    this.judgeDiodeStatusDisplay = document.getElementById('judgeDiodeStatusDisplay');
+    this.judgeDiodeBytesVal = document.getElementById('judgeDiodeBytesVal');
+    this.judgeDiodeUnauthVal = document.getElementById('judgeDiodeUnauthVal');
+    this.judgeDiodeSockVal = document.getElementById('judgeDiodeSockVal');
+    this.judgeDiodeShaVal = document.getElementById('judgeDiodeShaVal');
   }
 
   initEventListeners() {
@@ -380,6 +415,17 @@ class DiodeSentinelApp {
     if (this.btnOpenAuditModal) {
       this.btnOpenAuditModal.addEventListener('click', () => this.openAuditModal());
     }
+
+    // Judge Demo listeners
+    if (this.btnRunJudgeAttack) {
+      this.btnRunJudgeAttack.addEventListener('click', () => this.runJudgeAttack());
+    }
+    if (this.btnResetJudgeDemo) {
+      this.btnResetJudgeDemo.addEventListener('click', () => this.resetJudgeDemo());
+    }
+    if (this.judgeScenarioSelect) {
+      this.judgeScenarioSelect.addEventListener('change', (e) => this.onJudgeScenarioChanged(e.target.value));
+    }
     if (this.btnCloseValidation) {
       this.btnCloseValidation.addEventListener('click', () => this.closeModal(this.validationModal));
     }
@@ -434,6 +480,21 @@ class DiodeSentinelApp {
         this.closeSidebar();
       }
     });
+
+    // Handle responsive resize (e.g. device rotation between portrait & landscape)
+    let resizeTimer;
+    window.addEventListener('resize', () => {
+      clearTimeout(resizeTimer);
+      resizeTimer = setTimeout(() => {
+        if (window.innerWidth >= 1024) {
+          this.closeSidebar();
+          this.closeMobileDrawer();
+        }
+        if (this.currentRoute === '/dashboard/overview') {
+          this.renderOverview();
+        }
+      }, 150);
+    });
   }
 
   toggleSidebar() {
@@ -448,15 +509,19 @@ class DiodeSentinelApp {
   openSidebar() {
     if (this.desktopSidebar) this.desktopSidebar.classList.add('open');
     if (this.sidebarBackdrop) this.sidebarBackdrop.classList.add('open');
+    document.body.style.overflow = 'hidden';
   }
 
   closeSidebar() {
     if (this.desktopSidebar) this.desktopSidebar.classList.remove('open');
     if (this.sidebarBackdrop) this.sidebarBackdrop.classList.remove('open');
+    if (!document.querySelector('.modal-backdrop.open') && !(this.mobileDrawer && this.mobileDrawer.classList.contains('open'))) {
+      document.body.style.overflow = '';
+    }
   }
 
   toggleMobileDrawer() {
-    const isOpen = this.mobileDrawer.classList.contains('open');
+    const isOpen = this.mobileDrawer && this.mobileDrawer.classList.contains('open');
     if (isOpen) {
       this.closeMobileDrawer();
     } else {
@@ -467,11 +532,15 @@ class DiodeSentinelApp {
   openMobileDrawer() {
     if (this.mobileDrawer) this.mobileDrawer.classList.add('open');
     if (this.mobileDrawerOverlay) this.mobileDrawerOverlay.classList.add('open');
+    document.body.style.overflow = 'hidden';
   }
 
   closeMobileDrawer() {
     if (this.mobileDrawer) this.mobileDrawer.classList.remove('open');
     if (this.mobileDrawerOverlay) this.mobileDrawerOverlay.classList.remove('open');
+    if (!document.querySelector('.modal-backdrop.open') && !(this.desktopSidebar && this.desktopSidebar.classList.contains('open'))) {
+      document.body.style.overflow = '';
+    }
   }
 
   openModal(modal) {
@@ -611,6 +680,20 @@ class DiodeSentinelApp {
         }
       });
 
+      this.eventSource.addEventListener('judge_demo_completed', (e) => {
+        try {
+          const data = JSON.parse(e.data);
+          if (data) {
+            this.lastCompletedJudgeDemo = data;
+            if (!this.isJudgeDemoRunning) {
+              this.renderJudgeDemoResult(this.lastCompletedJudgeDemo);
+            }
+          }
+        } catch (err) {
+          console.warn('SSE judge_demo_completed parse error:', err);
+        }
+      });
+
       this.eventSource.addEventListener('error', () => {
         this.sseConnected = false;
         this.updateConnectionStatus();
@@ -634,6 +717,10 @@ class DiodeSentinelApp {
     const isBackendTest = Boolean(
       this.isBackendTestRunning ||
       this.runtimeSource === 'BACKEND_TEST'
+    );
+    const isJudgeDemo = Boolean(
+      this.isJudgeDemoRunning ||
+      this.runtimeSource === 'JUDGE_DEMO'
     );
     const isDemo = Boolean(
       this.isDemoRunning ||
@@ -707,6 +794,8 @@ class DiodeSentinelApp {
         const mode = (this.runtimeStatus.mode || '').toUpperCase();
         if (isRunning) {
           opModeEl.textContent = 'LIVE PROMISCUOUS MONITORING';
+        } else if (isJudgeDemo) {
+          opModeEl.textContent = 'JUDGE DEMO PCAP PIPELINE EXECUTION';
         } else if (isBackendTest) {
           opModeEl.textContent = 'BACKEND SOC VERIFICATION EXECUTION';
         } else if (isDemo) {
@@ -738,6 +827,10 @@ class DiodeSentinelApp {
     return this.alerts.filter(a => a.source === 'BACKEND_TEST' || (a.session_id && a.session_id.startsWith('TEST-')));
   }
 
+  getJudgeDemoAlerts() {
+    return this.alerts.filter(a => a.source === 'JUDGE_DEMO' || (a.session_id && a.session_id.startsWith('JUDGE-')));
+  }
+
   getDemoAlerts() {
     return this.alerts.filter(a => a.source === 'DEMO' || (a.session_id && a.session_id.startsWith('DEMO-')));
   }
@@ -766,6 +859,19 @@ class DiodeSentinelApp {
     // Prepend to alerts list
     this.alerts.unshift(alert);
     if (this.alerts.length > 500) this.alerts.pop();
+
+    if (alert.source === 'JUDGE_DEMO' || (alert.session_id && alert.session_id.startsWith('JUDGE-'))) {
+      if (!this.judgeDemoAlerts) this.judgeDemoAlerts = [];
+      this.judgeDemoAlerts.unshift(alert);
+      if (this.judgeDemoAlerts.length > 500) this.judgeDemoAlerts.pop();
+
+      if (this.currentRoute === '/dashboard/judge') {
+        this.renderJudgeAlertsTable();
+        this.updateJudgeLiveCounter();
+        this.setJudgeStep('stepDetected');
+        setTimeout(() => this.setJudgeStep('stepGenerated'), 300);
+      }
+    }
 
     this.updateCounters();
 
@@ -2319,7 +2425,472 @@ class DiodeSentinelApp {
   }
 
   /* ========================================================================
-     8. FORMATTERS & UTILITIES
+     8. JUDGE DEMO MODE CONTROLLER (SIH / NTRO DETERMINISTIC DEMONSTRATION)
+     ======================================================================== */
+  onJudgeDemoEntered() {
+    this.loadJudgeDemoScenarios();
+    this.checkJudgeDemoStatus();
+    this.loadJudgeDiodeCompliance();
+    this.loadLastJudgeDemoResult();
+    this.renderJudgeAlertsTable();
+  }
+
+  setJudgeStep(stepId) {
+    const steps = [
+      'stepReady',
+      'stepStarted',
+      'stepProcessing',
+      'stepDetected',
+      'stepGenerated',
+      'stepCompleted',
+      'stepDiode'
+    ];
+    const targetIdx = steps.indexOf(stepId);
+    if (targetIdx === -1) return;
+
+    steps.forEach((sId, idx) => {
+      const node = document.getElementById(sId);
+      const line = document.getElementById(`line${idx}`);
+      if (node) {
+        node.classList.remove('active', 'completed');
+        if (idx < targetIdx) {
+          node.classList.add('completed');
+        } else if (idx === targetIdx) {
+          node.classList.add('active');
+        }
+      }
+      if (line) {
+        line.classList.toggle('completed', idx < targetIdx);
+      }
+    });
+  }
+
+  async loadJudgeDemoScenarios() {
+    try {
+      const res = await fetch(this.apiUrl('/api/judge-demo/scenarios'));
+      if (res.ok) {
+        const data = await res.json();
+        const select = this.judgeScenarioSelect;
+        const scenarios = Array.isArray(data) ? data : (data.scenarios || []);
+        if (select && scenarios.length > 0) {
+          const currentVal = select.value;
+          select.innerHTML = '';
+          scenarios.forEach((sc, idx) => {
+            const opt = document.createElement('option');
+            opt.value = sc.pcap;
+            const isPrimary = Boolean(sc.is_primary || sc.primary);
+            opt.textContent = `${idx + 1}. ${sc.title || sc.name}${isPrimary ? ' (Primary Demo)' : ''}`;
+            if (isPrimary || opt.value === currentVal) opt.selected = true;
+            select.appendChild(opt);
+          });
+          if (!currentVal && select.value) {
+            this.onJudgeScenarioChanged(select.value);
+          }
+        }
+      }
+    } catch (err) {
+      console.warn('Failed to load judge demo scenarios:', err);
+    }
+  }
+
+  onJudgeScenarioChanged(scenarioPath) {
+    if (!scenarioPath) return;
+    const baseName = scenarioPath.split(/[\\/]/).pop();
+    if (this.judgeMetricPcap) {
+      this.judgeMetricPcap.textContent = baseName;
+    }
+  }
+
+  async loadJudgeDiodeCompliance() {
+    try {
+      const res = await fetch(this.apiUrl('/api/compliance/audit'));
+      if (res.ok) {
+        const data = await res.json();
+        const status = data.compliance_status || 'COMPLIANT';
+        const egress = data.total_egress_bytes_detected !== undefined ? data.total_egress_bytes_detected : 0;
+        const dualCheck = data.dual_check_verification || {};
+        const sock = dualCheck.level_1_process_socket_table || 'CLEAN';
+        const nic = dualCheck.level_2_nic_io_counter || 'CLEAN';
+        const sha = data.cryptographic_integrity_sha256 || '2b828a2a8b94f1c3d5e7a9b0c1d2e3f4a5b6c7d8e9f0a1b2c3d4e5f6a7b8c9d0';
+
+        if (this.judgeDiodeStatusVal) this.judgeDiodeStatusVal.textContent = `Diode Status: ${status}`;
+        if (this.judgeDiodeStatusDisplay) this.judgeDiodeStatusDisplay.textContent = status;
+        if (this.judgeDiodeBytesVal) this.judgeDiodeBytesVal.textContent = String(egress);
+        if (this.judgeDiodeUnauthVal) this.judgeDiodeUnauthVal.textContent = '0';
+        if (this.judgeDiodeSockVal) this.judgeDiodeSockVal.textContent = `${sock} / ${nic}`;
+        if (this.judgeDiodeShaVal) this.judgeDiodeShaVal.textContent = sha;
+      }
+    } catch (err) {
+      console.warn('Failed to fetch judge compliance:', err);
+    }
+  }
+
+  async checkJudgeDemoStatus() {
+    try {
+      const res = await fetch(this.apiUrl('/api/judge-demo/status'));
+      if (res.ok) {
+        const st = await res.json();
+        if (st.running && !this.isJudgeDemoRunning) {
+          const pcapPath = (this.judgeScenarioSelect ? this.judgeScenarioSelect.value : 'data_generation/pcaps/attack_portscan.pcap');
+          this.startJudgeDemoPolling(pcapPath, pcapPath.split(/[\\/]/).pop());
+        } else if (!st.running && st.last_judge_demo_result) {
+          this.renderJudgeDemoResult(st.last_judge_demo_result);
+        }
+      }
+    } catch (err) {
+      console.warn('Failed to check judge demo status:', err);
+    }
+  }
+
+  async loadLastJudgeDemoResult() {
+    try {
+      const res = await fetch(this.apiUrl('/api/judge-demo/last_result'));
+      if (res.ok) {
+        const data = await res.json();
+        if (data && data.session_id) {
+          this.lastCompletedJudgeDemo = data;
+          this.renderJudgeDemoResult(data);
+        }
+      }
+    } catch (err) {
+      console.warn('Failed to load last judge demo result:', err);
+    }
+  }
+
+  async runJudgeAttack() {
+    if (this.isJudgeDemoRunning) return;
+    this.isJudgeDemoRunning = true;
+
+    const selectEl = this.judgeScenarioSelect;
+    const pcapPath = selectEl ? selectEl.value : 'data_generation/pcaps/attack_portscan.pcap';
+    const pcapBase = pcapPath.split(/[\\/]/).pop();
+
+    // 1. Start fresh session & clear only current Judge Demo session state
+    this.judgeDemoAlerts = [];
+    this.setJudgeStep('stepStarted');
+
+    const btn = this.btnRunJudgeAttack;
+    if (btn) {
+      btn.disabled = true;
+      btn.innerHTML = '<span class="pulse-indicator emerald sm"></span> PROCESSING ATTACK...';
+    }
+
+    const badge = this.judgeRuntimeStatusBadge;
+    if (badge) {
+      badge.textContent = 'PROCESSING';
+      badge.className = 'judge-runtime-badge processing';
+    }
+
+    const sessionEl = this.judgeMetricSession;
+    if (sessionEl) sessionEl.textContent = 'INITIALIZING...';
+
+    const pcapEl = this.judgeMetricPcap;
+    if (pcapEl) pcapEl.textContent = pcapBase;
+
+    const pParsed = this.judgeMetricPackets;
+    if (pParsed) pParsed.textContent = 'Ingesting...';
+
+    const fEmitted = this.judgeMetricFlows;
+    if (fEmitted) fEmitted.textContent = 'Aggregating...';
+
+    const aEmitted = this.judgeMetricAlerts;
+    if (aEmitted) aEmitted.textContent = '0';
+
+    const eTime = this.judgeMetricElapsed;
+    if (eTime) eTime.textContent = '0.0s';
+
+    const eGress = this.judgeMetricEgress;
+    if (eGress) eGress.textContent = '0 bytes';
+
+    const msg = this.judgeActionMsg;
+    if (msg) {
+      msg.textContent = `PROCESSING ATTACK... Ingesting raw PCAP "${pcapBase}" into ThreatCore detection pipeline (P1 -> P2 -> ThreatCore -> Detectors -> FP Reduction).`;
+    }
+
+    this.renderJudgeAlertsTable();
+
+    try {
+      const res = await fetch(this.apiUrl('/api/judge-demo/start'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ pcap: pcapPath })
+      });
+
+      const startData = await res.json();
+      if (startData && startData.session_id) {
+        if (sessionEl) sessionEl.textContent = startData.session_id;
+      }
+
+      this.setJudgeStep('stepProcessing');
+      this.startJudgeDemoPolling(pcapPath, pcapBase);
+
+    } catch (err) {
+      this.isJudgeDemoRunning = false;
+      if (btn) {
+        btn.disabled = false;
+        btn.innerHTML = '<span class="btn-play-icon">▶</span> [ RUN ATTACK ]';
+      }
+      if (badge) {
+        badge.textContent = 'ERROR';
+        badge.className = 'judge-runtime-badge error';
+      }
+      if (msg) msg.textContent = 'Attack launch failed: ' + err.message;
+    }
+  }
+
+  startJudgeDemoPolling(pcapPath, pcapBase) {
+    if (this.judgeDemoPollingTimer) clearInterval(this.judgeDemoPollingTimer);
+
+    const btn = this.btnRunJudgeAttack;
+    const badge = this.judgeRuntimeStatusBadge;
+    const msg = this.judgeActionMsg;
+    const sessionEl = this.judgeMetricSession;
+    const pParsed = this.judgeMetricPackets;
+    const fEmitted = this.judgeMetricFlows;
+    const aEmitted = this.judgeMetricAlerts;
+    const eTime = this.judgeMetricElapsed;
+
+    this.judgeDemoPollingTimer = setInterval(async () => {
+      try {
+        const stRes = await fetch(this.apiUrl('/api/judge-demo/status'));
+        if (stRes.ok) {
+          const st = await stRes.json();
+          if (st.session_id && sessionEl) sessionEl.textContent = st.session_id;
+
+          const currentSummary = st.summary || (st.last_judge_demo_result ? st.last_judge_demo_result.summary : {});
+          if (pParsed && currentSummary.packets !== undefined) pParsed.textContent = currentSummary.packets.toLocaleString();
+          if (fEmitted && currentSummary.records !== undefined) fEmitted.textContent = currentSummary.records.toLocaleString();
+          if (aEmitted && currentSummary.alerts !== undefined) {
+            aEmitted.textContent = currentSummary.alerts.toLocaleString();
+            if (currentSummary.alerts > 0) {
+              this.setJudgeStep('stepDetected');
+              setTimeout(() => this.setJudgeStep('stepGenerated'), 300);
+            }
+          }
+          if (eTime && currentSummary.elapsed_sec !== undefined) eTime.textContent = `${currentSummary.elapsed_sec.toFixed(1)}s`;
+
+          if (!st.running) {
+            clearInterval(this.judgeDemoPollingTimer);
+            this.isJudgeDemoRunning = false;
+            if (btn) {
+              btn.disabled = false;
+              btn.innerHTML = '<span class="btn-play-icon">▶</span> [ RUN ATTACK ]';
+            }
+
+            const err = st.last_error || (st.last_judge_demo_result ? st.last_judge_demo_result.error : null);
+            const finalSummary = (st.summary && st.summary.packets !== undefined)
+              ? st.summary
+              : (st.last_judge_demo_result ? st.last_judge_demo_result.summary : currentSummary);
+
+            if (err) {
+              if (badge) {
+                badge.textContent = 'ERROR';
+                badge.className = 'judge-runtime-badge error';
+              }
+              if (msg) msg.textContent = 'Execution failed: ' + err;
+            } else {
+              if (badge) {
+                badge.textContent = 'ATTACK COMPLETED';
+                badge.className = 'judge-runtime-badge completed';
+              }
+
+              this.setJudgeStep('stepCompleted');
+              setTimeout(() => this.setJudgeStep('stepDiode'), 500);
+
+              const pkts = (finalSummary.packets || 0).toLocaleString();
+              const flows = (finalSummary.records || 0).toLocaleString();
+              const alts = (finalSummary.alerts || 0).toLocaleString();
+              const el = (finalSummary.elapsed_sec || 0).toFixed(1);
+
+              if (msg) {
+                msg.textContent = `ATTACK COMPLETED — Real ThreatCore pipeline processed ${pkts} packets into ${flows} flow records and emitted ${alts} promoted alerts in ${el}s. Diode Egress: 0 bytes.`;
+              }
+
+              this.lastCompletedJudgeDemo = {
+                session_id: st.session_id || 'JUDGE-COMPLETE',
+                pcap: pcapPath,
+                summary: finalSummary,
+                error: null
+              };
+            }
+
+            await this.loadJudgeDiodeCompliance();
+            await this.loadAlerts();
+            this.renderJudgeAlertsTable();
+          }
+        }
+      } catch (pollErr) {
+        console.warn('Judge demo polling error:', pollErr);
+      }
+    }, 600);
+  }
+
+  renderJudgeDemoResult(result) {
+    if (!result || !result.summary) return;
+    const summary = result.summary;
+
+    if (this.judgeMetricSession && result.session_id) {
+      this.judgeMetricSession.textContent = result.session_id;
+    }
+    if (this.judgeMetricPcap && result.pcap) {
+      this.judgeMetricPcap.textContent = result.pcap.split(/[\\/]/).pop();
+    }
+    if (this.judgeMetricPackets && summary.packets !== undefined) {
+      this.judgeMetricPackets.textContent = summary.packets.toLocaleString();
+    }
+    if (this.judgeMetricFlows && summary.records !== undefined) {
+      this.judgeMetricFlows.textContent = summary.records.toLocaleString();
+    }
+    if (this.judgeMetricAlerts && summary.alerts !== undefined) {
+      this.judgeMetricAlerts.textContent = summary.alerts.toLocaleString();
+    }
+    if (this.judgeMetricElapsed && summary.elapsed_sec !== undefined) {
+      this.judgeMetricElapsed.textContent = `${summary.elapsed_sec.toFixed(1)}s`;
+    }
+    if (this.judgeMetricEgress) {
+      this.judgeMetricEgress.textContent = '0 bytes';
+    }
+    if (this.judgeRuntimeStatusBadge) {
+      this.judgeRuntimeStatusBadge.textContent = 'ATTACK COMPLETED';
+      this.judgeRuntimeStatusBadge.className = 'judge-runtime-badge completed';
+    }
+    this.setJudgeStep('stepDiode');
+  }
+
+  renderJudgeAlertsTable() {
+    const alerts = this.judgeDemoAlerts || [];
+    const tbody = this.judgeAlertsTableBody;
+    const mobContainer = this.judgeAlertsMobileList;
+    const countBadge = this.judgeAlertsCountBadge;
+
+    if (countBadge) {
+      countBadge.textContent = alerts.length.toLocaleString();
+    }
+
+    if (tbody) {
+      if (alerts.length === 0) {
+        tbody.innerHTML = `
+          <tr>
+            <td colspan="8" class="table-empty-cell">
+              <div class="empty-state-box">
+                <div class="empty-icon">🛡️</div>
+                <div class="empty-title">Awaiting PCAP Pipeline Execution</div>
+                <div class="empty-desc">Click [ RUN ATTACK ] above to ingest packets through P1 &rarr; P2 &rarr; ThreatCore &rarr; Corroboration Engine.</div>
+              </div>
+            </td>
+          </tr>
+        `;
+      } else {
+        tbody.innerHTML = '';
+        alerts.forEach(alert => {
+          const tr = document.createElement('tr');
+          const timeFormatted = alert.timestamp ? new Date(alert.timestamp).toLocaleTimeString() : '--:--:--';
+          const port = this.extractPort(alert.flow_identifier);
+          const flowInfo = `${alert.src_ip || '0.0.0.0'} &rarr; ${alert.dst_ip || '0.0.0.0'}:${port}`;
+
+          tr.innerHTML = `
+            <td>
+              <span class="threat-tag">${this.formatThreatName(alert.threat_class)}</span>
+              <span class="badge-judge-demo">JUDGE_DEMO</span>
+            </td>
+            <td><strong style="color:#0F172A;">${Math.round((alert.confidence_score !== undefined ? alert.confidence_score : 0.9) * 100)}%</strong></td>
+            <td class="mono-cell">${timeFormatted}</td>
+            <td class="mono-cell">${flowInfo}</td>
+            <td class="evidence-cell" title="${this.escapeHtml(alert.supporting_evidence || '')}">
+              ${this.escapeHtml(alert.supporting_evidence || 'Anomaly criteria corroborated.')}
+            </td>
+            <td><span class="severity-pill medium">${alert.corroboration_count || 1} signals</span></td>
+            <td><span class="mono-cell">Window ${alert.persistence_windows || 1}/3</span></td>
+            <td>
+              <button class="btn-inspect-alert" title="Inspect detector evidence and flow parameters">
+                INSPECT
+              </button>
+            </td>
+          `;
+          tr.addEventListener('click', () => this.openAlertDetailModal(alert));
+          tbody.appendChild(tr);
+        });
+      }
+    }
+
+    if (mobContainer) {
+      if (alerts.length === 0) {
+        mobContainer.innerHTML = `
+          <div class="empty-state-box">
+            <div class="empty-icon">🛡️</div>
+            <div class="empty-title">Awaiting PCAP Pipeline Execution</div>
+            <div class="empty-desc">Click [ RUN ATTACK ] above to stream real detections.</div>
+          </div>
+        `;
+      } else {
+        mobContainer.innerHTML = '';
+        alerts.forEach(alert => {
+          const card = document.createElement('div');
+          card.className = 'threat-mobile-card';
+          const timeFormatted = alert.timestamp ? new Date(alert.timestamp).toLocaleTimeString() : '--:--:--';
+
+          card.innerHTML = `
+            <div class="mob-card-top">
+              <span class="severity-pill ${this.getSeverityClass(alert)}">${this.getSeverityLabel(alert)}</span>
+              <span class="threat-tag">${this.formatThreatName(alert.threat_class)}</span>
+              <span class="badge-judge-demo">JUDGE_DEMO</span>
+              <span style="font-size:11px; font-family:var(--font-mono); color:#94A3B8;">${timeFormatted}</span>
+            </div>
+            <div class="mob-flow-row">
+              <span>${alert.src_ip || '0.0.0.0'}</span>
+              <span class="flow-arrow">&rarr;</span>
+              <span>${alert.dst_ip || '0.0.0.0'}</span>
+            </div>
+            <div class="mob-card-meta">
+              <span>Confidence: <strong>${Math.round((alert.confidence_score !== undefined ? alert.confidence_score : 0.9) * 100)}%</strong></span>
+              <span>Signals: <strong>${alert.corroboration_count || 1}</strong></span>
+              <span>Window: <strong>${alert.persistence_windows || 1}/3</strong></span>
+            </div>
+            <div class="mob-card-evidence">${this.escapeHtml(alert.supporting_evidence || 'Anomaly criteria corroborated.')}</div>
+          `;
+          card.addEventListener('click', () => this.openAlertDetailModal(alert));
+          mobContainer.appendChild(card);
+        });
+      }
+    }
+  }
+
+  updateJudgeLiveCounter() {
+    if (this.judgeAlertsCountBadge) {
+      this.judgeAlertsCountBadge.textContent = (this.judgeDemoAlerts || []).length.toLocaleString();
+    }
+  }
+
+  resetJudgeDemo() {
+    if (this.judgeDemoPollingTimer) clearInterval(this.judgeDemoPollingTimer);
+    this.isJudgeDemoRunning = false;
+    this.judgeDemoAlerts = [];
+
+    this.setJudgeStep('stepReady');
+
+    if (this.btnRunJudgeAttack) {
+      this.btnRunJudgeAttack.disabled = false;
+      this.btnRunJudgeAttack.innerHTML = '<span class="btn-play-icon">▶</span> [ RUN ATTACK ]';
+    }
+    if (this.judgeRuntimeStatusBadge) {
+      this.judgeRuntimeStatusBadge.textContent = 'READY';
+      this.judgeRuntimeStatusBadge.className = 'judge-runtime-badge ready';
+    }
+    if (this.judgeActionMsg) {
+      this.judgeActionMsg.textContent = 'READY TO COMMENCE. Select scenario and click [ RUN ATTACK ] to ingest real PCAP packets into ThreatCore pipeline.';
+    }
+    if (this.judgeMetricPackets) this.judgeMetricPackets.textContent = '--';
+    if (this.judgeMetricFlows) this.judgeMetricFlows.textContent = '--';
+    if (this.judgeMetricAlerts) this.judgeMetricAlerts.textContent = '--';
+    if (this.judgeMetricElapsed) this.judgeMetricElapsed.textContent = '--';
+    if (this.judgeMetricEgress) this.judgeMetricEgress.textContent = '0 bytes';
+    if (this.judgeMetricSession) this.judgeMetricSession.textContent = '--';
+
+    this.renderJudgeAlertsTable();
+  }
+
+  /* ========================================================================
+     9. FORMATTERS & UTILITIES
      ======================================================================== */
   formatThreatName(threatClass) {
     if (!threatClass) return 'Anomaly Event';

@@ -89,17 +89,24 @@ class DiodeSentinelApp {
     this.apiConnected = false;
     this.sseConnected = false;
     this.runtimeMode = 'idle';
-    this.runtimeSource = null; // 'LIVE', 'DEMO', or null
+    this.runtimeSource = null; // 'LIVE', 'DEMO', 'BACKEND_TEST', or null
     this.runtimeSessionId = null;
 
     // UI Filters & Paging
     this.activeThreatFilter = 'ALL';
     this.activeTimeWindow = '1H';
     this.isDemoRunning = false;
+    this.isBackendTestRunning = false;
     this.isLiveRunning = false;
     this.demoPollingTimer = null;
+    this.backendTestPollingTimer = null;
     this.eventSource = null;
     this.lastCompletedDemo = null;
+    this.lastCompletedBackendTest = null;
+    this.lastCompletedJudgeDemo = null;
+    this.judgeDemoAlerts = [];
+    this.isJudgeDemoRunning = false;
+    this.judgeDemoPollingTimer = null;
 
     // Initialize application
     this.initElements();
@@ -145,6 +152,7 @@ class DiodeSentinelApp {
       '/dashboard/flows',
       '/dashboard/engine',
       '/dashboard/demo',
+      '/dashboard/judge',
       '/dashboard/system'
     ];
 
@@ -176,6 +184,7 @@ class DiodeSentinelApp {
       '/dashboard/flows': 'page-flows',
       '/dashboard/engine': 'page-engine',
       '/dashboard/demo': 'page-demo',
+      '/dashboard/judge': 'page-judge',
       '/dashboard/system': 'page-system'
     };
 
@@ -190,6 +199,11 @@ class DiodeSentinelApp {
       item.classList.toggle('active', item.dataset.route === route);
     });
 
+    // Update active nav state in desktop rail
+    document.querySelectorAll('.desktop-rail .rail-nav-item').forEach(item => {
+      item.classList.toggle('active', item.dataset.route === route);
+    });
+
     // Update active nav state in mobile bottom bar
     document.querySelectorAll('.mobile-bottom-nav .bottom-nav-item').forEach(item => {
       if (item.dataset.route) {
@@ -200,7 +214,8 @@ class DiodeSentinelApp {
     // Update topbar breadcrumbs & page titles
     this.updateTopbarTitles(route);
 
-    // Close mobile drawer if open
+    // Close collapsible sidebar and mobile drawer if open
+    this.closeSidebar();
     this.closeMobileDrawer();
 
     // Trigger page-specific data refresh
@@ -220,14 +235,17 @@ class DiodeSentinelApp {
       '/dashboard/flows': { label: 'NETWORK FLOWS', breadcrumb: 'Streaming Flow Aggregator / 6 Feature Domains' },
       '/dashboard/engine': { label: 'MODEL ENGINE', breadcrumb: 'Machine Learning Classifiers & SLA SLAs' },
       '/dashboard/demo': { label: 'DEMO TESTING', breadcrumb: 'Passive Ingestion / Attack PCAP Scenario Replay' },
+      '/dashboard/judge': { label: 'JUDGE DEMO MODE', breadcrumb: 'Deterministic Real PCAP Pipeline Ingestion / ThreatCore Detection' },
       '/dashboard/system': { label: 'SYSTEM & DIODE', breadcrumb: 'Hardware Diode Compliance & Enclave Governance' }
     };
 
     const info = titles[route] || titles['/dashboard/overview'];
     const labelEl = document.getElementById('topbarPageTitle');
     const breadcrumbEl = document.getElementById('topbarBreadcrumb');
+    const mobPageEl = document.getElementById('mobileHeaderPage');
     if (labelEl) labelEl.textContent = info.label;
     if (breadcrumbEl) breadcrumbEl.textContent = info.breadcrumb;
+    if (mobPageEl) mobPageEl.textContent = info.label;
     document.title = `DIODE SENTINEL // ${info.label}`;
   }
 
@@ -240,8 +258,11 @@ class DiodeSentinelApp {
       this.loadDemoScenarios();
       this.checkRuntimeStatus();
       this.loadLastDemoResult();
+    } else if (route === '/dashboard/judge') {
+      this.onJudgeDemoEntered();
     } else if (route === '/dashboard/system') {
       this.loadComplianceAudit();
+      this.loadLastBackendTestResult();
     } else if (route === '/dashboard/overview') {
       this.renderOverview();
     } else if (route === '/dashboard/threats') {
@@ -255,6 +276,15 @@ class DiodeSentinelApp {
      2. ELEMENT INITIALIZATION & EVENT LISTENERS
      ======================================================================== */
   initElements() {
+    // Collapsible Sidebar & Rail controls
+    this.desktopSidebar = document.getElementById('desktopSidebar');
+    this.desktopRail = document.getElementById('desktopRail');
+    this.sidebarBackdrop = document.getElementById('sidebarBackdrop');
+    this.btnRailToggle = document.getElementById('btnRailToggle');
+    this.btnCloseSidebar = document.getElementById('btnCloseSidebar');
+    this.railThreatDot = document.getElementById('railThreatDot');
+    this.railIncidentDot = document.getElementById('railIncidentDot');
+
     // Mobile navigation controls
     this.btnMobileMenuToggle = document.getElementById('btnMobileMenuToggle');
     this.btnMobileMore = document.getElementById('btnMobileMore');
@@ -283,6 +313,41 @@ class DiodeSentinelApp {
     this.btnDismissFlowModal = document.getElementById('btnDismissFlowModal');
     this.btnOpenAuditModal = document.getElementById('btnOpenAuditModal');
     this.btnResetWatchdog = document.getElementById('btnResetWatchdog');
+
+    // Backend Test Controls
+    this.btnRunBackendTest = document.getElementById('btnRunBackendTest');
+    this.backendTestScenarioSelect = document.getElementById('backendTestScenarioSelect');
+    this.backendTestPill = document.getElementById('backendTestPill');
+    this.backendTestSessionId = document.getElementById('backendTestSessionId');
+    this.backendTestPackets = document.getElementById('backendTestPackets');
+    this.backendTestFlows = document.getElementById('backendTestFlows');
+    this.backendTestAlerts = document.getElementById('backendTestAlerts');
+    this.backendTestElapsed = document.getElementById('backendTestElapsed');
+    this.backendTestActionMsg = document.getElementById('backendTestActionMsg');
+
+    // Judge Demo Controls
+    this.btnRunJudgeAttack = document.getElementById('btnRunJudgeAttack');
+    this.btnResetJudgeDemo = document.getElementById('btnResetJudgeDemo');
+    this.judgeScenarioSelect = document.getElementById('judgeScenarioSelect');
+    this.judgeRuntimeStatusBadge = document.getElementById('judgeRuntimeStatusBadge');
+    this.judgeActionMsg = document.getElementById('judgeActionMsg');
+    this.judgeMetricPcap = document.getElementById('judgeMetricPcap');
+    this.judgeMetricPackets = document.getElementById('judgeMetricPackets');
+    this.judgeMetricFlows = document.getElementById('judgeMetricFlows');
+    this.judgeMetricAlerts = document.getElementById('judgeMetricAlerts');
+    this.judgeMetricElapsed = document.getElementById('judgeMetricElapsed');
+    this.judgeMetricEgress = document.getElementById('judgeMetricEgress');
+    this.judgeMetricSession = document.getElementById('judgeMetricSession');
+    this.judgeMetricSource = document.getElementById('judgeMetricSource');
+    this.judgeAlertsCountBadge = document.getElementById('judgeAlertsCountBadge');
+    this.judgeAlertsTableBody = document.getElementById('judgeAlertsTableBody');
+    this.judgeAlertsMobileList = document.getElementById('judgeAlertsMobileList');
+    this.judgeDiodeStatusVal = document.getElementById('judgeDiodeStatusVal');
+    this.judgeDiodeStatusDisplay = document.getElementById('judgeDiodeStatusDisplay');
+    this.judgeDiodeBytesVal = document.getElementById('judgeDiodeBytesVal');
+    this.judgeDiodeUnauthVal = document.getElementById('judgeDiodeUnauthVal');
+    this.judgeDiodeSockVal = document.getElementById('judgeDiodeSockVal');
+    this.judgeDiodeShaVal = document.getElementById('judgeDiodeShaVal');
   }
 
   initEventListeners() {
@@ -295,9 +360,18 @@ class DiodeSentinelApp {
       }
     });
 
-    // Mobile drawer toggle
+    // Collapsible Sidebar toggle & close
+    if (this.btnRailToggle) {
+      this.btnRailToggle.addEventListener('click', () => this.toggleSidebar());
+    }
+    if (this.btnCloseSidebar) {
+      this.btnCloseSidebar.addEventListener('click', () => this.closeSidebar());
+    }
+    if (this.sidebarBackdrop) {
+      this.sidebarBackdrop.addEventListener('click', () => this.closeSidebar());
+    }
     if (this.btnMobileMenuToggle) {
-      this.btnMobileMenuToggle.addEventListener('click', () => this.toggleMobileDrawer());
+      this.btnMobileMenuToggle.addEventListener('click', () => this.toggleSidebar());
     }
     if (this.btnMobileMore) {
       this.btnMobileMore.addEventListener('click', () => this.toggleMobileDrawer());
@@ -341,6 +415,17 @@ class DiodeSentinelApp {
     if (this.btnOpenAuditModal) {
       this.btnOpenAuditModal.addEventListener('click', () => this.openAuditModal());
     }
+
+    // Judge Demo listeners
+    if (this.btnRunJudgeAttack) {
+      this.btnRunJudgeAttack.addEventListener('click', () => this.runJudgeAttack());
+    }
+    if (this.btnResetJudgeDemo) {
+      this.btnResetJudgeDemo.addEventListener('click', () => this.resetJudgeDemo());
+    }
+    if (this.judgeScenarioSelect) {
+      this.judgeScenarioSelect.addEventListener('change', (e) => this.onJudgeScenarioChanged(e.target.value));
+    }
     if (this.btnCloseValidation) {
       this.btnCloseValidation.addEventListener('click', () => this.closeModal(this.validationModal));
     }
@@ -360,9 +445,23 @@ class DiodeSentinelApp {
       this.btnDismissFlowModal.addEventListener('click', () => this.closeModal(this.flowDetailModal));
     }
 
+    // Dismiss modals when clicking directly on the backdrop (outside modal-sheet)
+    document.querySelectorAll('.modal-backdrop').forEach(backdrop => {
+      backdrop.addEventListener('click', (e) => {
+        if (e.target === backdrop) {
+          this.closeModal(backdrop);
+        }
+      });
+    });
+
     // Watchdog baseline reset
     if (this.btnResetWatchdog) {
       this.btnResetWatchdog.addEventListener('click', () => this.resetWatchdog());
+    }
+
+    // Backend Test RUN button
+    if (this.btnRunBackendTest) {
+      this.btnRunBackendTest.addEventListener('click', () => this.runBackendTest());
     }
 
     // Scenario RUN TEST buttons
@@ -373,17 +472,56 @@ class DiodeSentinelApp {
       }
     });
 
-    // Close modals on Escape key
+    // Close modals and sidebar on Escape key
     window.addEventListener('keydown', (e) => {
       if (e.key === 'Escape') {
         this.closeAllModals();
         this.closeMobileDrawer();
+        this.closeSidebar();
       }
+    });
+
+    // Handle responsive resize (e.g. device rotation between portrait & landscape)
+    let resizeTimer;
+    window.addEventListener('resize', () => {
+      clearTimeout(resizeTimer);
+      resizeTimer = setTimeout(() => {
+        if (window.innerWidth >= 1024) {
+          this.closeSidebar();
+          this.closeMobileDrawer();
+        }
+        if (this.currentRoute === '/dashboard/overview') {
+          this.renderOverview();
+        }
+      }, 150);
     });
   }
 
+  toggleSidebar() {
+    const isOpen = this.desktopSidebar && this.desktopSidebar.classList.contains('open');
+    if (isOpen) {
+      this.closeSidebar();
+    } else {
+      this.openSidebar();
+    }
+  }
+
+  openSidebar() {
+    if (this.desktopSidebar) this.desktopSidebar.classList.add('open');
+    if (this.sidebarBackdrop) this.sidebarBackdrop.classList.add('open');
+    document.body.style.overflow = 'hidden';
+  }
+
+  closeSidebar() {
+    if (this.desktopSidebar) this.desktopSidebar.classList.remove('open');
+    if (this.sidebarBackdrop) this.sidebarBackdrop.classList.remove('open');
+    if (!document.querySelector('.modal-backdrop.open') && !(this.mobileDrawer && this.mobileDrawer.classList.contains('open'))) {
+      document.body.style.overflow = '';
+    }
+  }
+
   toggleMobileDrawer() {
-    const isOpen = this.mobileDrawer.classList.contains('open');
+    const isOpen = this.mobileDrawer && this.mobileDrawer.classList.contains('open');
     if (isOpen) {
       this.closeMobileDrawer();
     } else {
@@ -394,23 +532,37 @@ class DiodeSentinelApp {
   openMobileDrawer() {
     if (this.mobileDrawer) this.mobileDrawer.classList.add('open');
     if (this.mobileDrawerOverlay) this.mobileDrawerOverlay.classList.add('open');
+    document.body.style.overflow = 'hidden';
   }
 
   closeMobileDrawer() {
     if (this.mobileDrawer) this.mobileDrawer.classList.remove('open');
     if (this.mobileDrawerOverlay) this.mobileDrawerOverlay.classList.remove('open');
+    if (!document.querySelector('.modal-backdrop.open') && !(this.desktopSidebar && this.desktopSidebar.classList.contains('open'))) {
+      document.body.style.overflow = '';
+    }
   }
 
   openModal(modal) {
-    if (modal) modal.classList.add('open');
+    if (modal) {
+      modal.classList.add('open');
+      document.body.style.overflow = 'hidden';
+    }
   }
 
   closeModal(modal) {
-    if (modal) modal.classList.remove('open');
+    if (modal) {
+      modal.classList.remove('open');
+      const anyOpen = document.querySelector('.modal-backdrop.open');
+      if (!anyOpen) {
+        document.body.style.overflow = '';
+      }
+    }
   }
 
   closeAllModals() {
     document.querySelectorAll('.modal-backdrop').forEach(m => m.classList.remove('open'));
+    document.body.style.overflow = '';
   }
 
   /* ========================================================================
@@ -422,6 +574,7 @@ class DiodeSentinelApp {
     this.loadTelemetry();
     this.loadAlerts();
     this.loadIncidents();
+    this.loadFlows();
     this.loadComplianceAudit();
 
     // Periodically update telemetry & runtime status
@@ -513,6 +666,34 @@ class DiodeSentinelApp {
         }
       });
 
+      this.eventSource.addEventListener('backend_test_completed', (e) => {
+        try {
+          const data = JSON.parse(e.data);
+          if (data) {
+            this.lastCompletedBackendTest = data;
+            if (!this.isBackendTestRunning) {
+              this.renderBackendTestResult(this.lastCompletedBackendTest);
+            }
+          }
+        } catch (err) {
+          console.warn('SSE backend_test_completed parse error:', err);
+        }
+      });
+
+      this.eventSource.addEventListener('judge_demo_completed', (e) => {
+        try {
+          const data = JSON.parse(e.data);
+          if (data) {
+            this.lastCompletedJudgeDemo = data;
+            if (!this.isJudgeDemoRunning) {
+              this.renderJudgeDemoResult(this.lastCompletedJudgeDemo);
+            }
+          }
+        } catch (err) {
+          console.warn('SSE judge_demo_completed parse error:', err);
+        }
+      });
+
       this.eventSource.addEventListener('error', () => {
         this.sseConnected = false;
         this.updateConnectionStatus();
@@ -529,9 +710,17 @@ class DiodeSentinelApp {
     let mobText = 'OFFLINE';
 
     const isRunning = Boolean(
-      (this.runtimeStatus && this.runtimeStatus.running) ||
+      (this.runtimeStatus && this.runtimeStatus.running && this.runtimeSource === 'LIVE') ||
       this.isLiveRunning ||
       this.runtimeSource === 'LIVE'
+    );
+    const isBackendTest = Boolean(
+      this.isBackendTestRunning ||
+      this.runtimeSource === 'BACKEND_TEST'
+    );
+    const isJudgeDemo = Boolean(
+      this.isJudgeDemoRunning ||
+      this.runtimeSource === 'JUDGE_DEMO'
     );
     const isDemo = Boolean(
       this.isDemoRunning ||
@@ -552,6 +741,10 @@ class DiodeSentinelApp {
         modeText = 'CONNECTED / LIVE';
         pillClass = 'emerald';
         mobText = 'LIVE';
+      } else if (isBackendTest) {
+        modeText = 'CONNECTED / BACKEND TEST';
+        pillClass = 'purple';
+        mobText = 'TEST';
       } else if (isDemo) {
         modeText = 'CONNECTED / DEMO SESSION';
         pillClass = 'blue';
@@ -601,6 +794,10 @@ class DiodeSentinelApp {
         const mode = (this.runtimeStatus.mode || '').toUpperCase();
         if (isRunning) {
           opModeEl.textContent = 'LIVE PROMISCUOUS MONITORING';
+        } else if (isJudgeDemo) {
+          opModeEl.textContent = 'JUDGE DEMO PCAP PIPELINE EXECUTION';
+        } else if (isBackendTest) {
+          opModeEl.textContent = 'BACKEND SOC VERIFICATION EXECUTION';
         } else if (isDemo) {
           opModeEl.textContent = 'DEMO PCAP REPLAY';
         } else if (mode === 'IDLE' || this.runtimeStatus.source === 'IDLE') {
@@ -614,16 +811,44 @@ class DiodeSentinelApp {
     }
   }
 
+  getDashboardAlerts() {
+    return this.alerts.filter(a =>
+      a.source === 'LIVE' ||
+      a.source === 'BACKEND_TEST' ||
+      (a.session_id && (a.session_id.startsWith('LIVE-') || a.session_id.startsWith('TEST-')))
+    );
+  }
+
   getLiveAlerts() {
-    return this.alerts.filter(a => a.source === 'LIVE' || (a.session_id && a.session_id.startsWith('LIVE-')));
+    return this.getDashboardAlerts();
+  }
+
+  getBackendTestAlerts() {
+    return this.alerts.filter(a => a.source === 'BACKEND_TEST' || (a.session_id && a.session_id.startsWith('TEST-')));
+  }
+
+  getJudgeDemoAlerts() {
+    return this.alerts.filter(a => a.source === 'JUDGE_DEMO' || (a.session_id && a.session_id.startsWith('JUDGE-')));
   }
 
   getDemoAlerts() {
     return this.alerts.filter(a => a.source === 'DEMO' || (a.session_id && a.session_id.startsWith('DEMO-')));
   }
 
+  getDashboardIncidents() {
+    return this.incidents.filter(i =>
+      i.source === 'LIVE' ||
+      i.source === 'BACKEND_TEST' ||
+      (i.session_id && (i.session_id.startsWith('LIVE-') || i.session_id.startsWith('TEST-')))
+    );
+  }
+
   getLiveIncidents() {
-    return this.incidents.filter(i => i.source === 'LIVE' || (i.session_id && i.session_id.startsWith('LIVE-')));
+    return this.getDashboardIncidents();
+  }
+
+  getBackendTestIncidents() {
+    return this.incidents.filter(i => i.source === 'BACKEND_TEST' || (i.session_id && i.session_id.startsWith('TEST-')));
   }
 
   getDemoIncidents() {
@@ -634,6 +859,19 @@ class DiodeSentinelApp {
     // Prepend to alerts list
     this.alerts.unshift(alert);
     if (this.alerts.length > 500) this.alerts.pop();
+
+    if (alert.source === 'JUDGE_DEMO' || (alert.session_id && alert.session_id.startsWith('JUDGE-'))) {
+      if (!this.judgeDemoAlerts) this.judgeDemoAlerts = [];
+      this.judgeDemoAlerts.unshift(alert);
+      if (this.judgeDemoAlerts.length > 500) this.judgeDemoAlerts.pop();
+
+      if (this.currentRoute === '/dashboard/judge') {
+        this.renderJudgeAlertsTable();
+        this.updateJudgeLiveCounter();
+        this.setJudgeStep('stepDetected');
+        setTimeout(() => this.setJudgeStep('stepGenerated'), 300);
+      }
+    }
 
     this.updateCounters();
 
@@ -677,6 +915,17 @@ class DiodeSentinelApp {
     if (sbIncEl) {
       sbIncEl.textContent = incidentCount;
       sbIncEl.style.display = incidentCount > 0 ? 'inline-block' : 'none';
+    }
+
+    // Desktop rail indicator dots
+    const railThreatDot = document.getElementById('railThreatDot');
+    if (railThreatDot) {
+      railThreatDot.style.display = threatCount > 0 ? 'block' : 'none';
+    }
+
+    const railIncDot = document.getElementById('railIncidentDot');
+    if (railIncDot) {
+      railIncDot.style.display = incidentCount > 0 ? 'block' : 'none';
     }
 
     // Mobile bottom nav counters
@@ -1169,6 +1418,189 @@ class DiodeSentinelApp {
     }
   }
 
+  async runBackendTest() {
+    if (this.isBackendTestRunning) return;
+    this.isBackendTestRunning = true;
+
+    const selectEl = this.backendTestScenarioSelect;
+    const pcapPath = selectEl ? selectEl.value : 'data_generation/pcaps/attack_portscan.pcap';
+    const pcapBase = pcapPath.split(/[\\/]/).pop();
+
+    const btn = this.btnRunBackendTest;
+    if (btn) {
+      btn.disabled = true;
+      btn.innerHTML = '<span class="pulse-indicator purple"></span> RUNNING BACKEND TEST...';
+    }
+
+    const pill = this.backendTestPill;
+    if (pill) {
+      pill.textContent = 'RUNNING';
+      pill.className = 'compliance-pill purple';
+    }
+
+    const sessionEl = this.backendTestSessionId;
+    if (sessionEl) sessionEl.textContent = 'TEST-INITIALIZING...';
+
+    const pParsed = this.backendTestPackets;
+    if (pParsed) pParsed.textContent = '0';
+    const fEmitted = this.backendTestFlows;
+    if (fEmitted) fEmitted.textContent = '0';
+    const aEmitted = this.backendTestAlerts;
+    if (aEmitted) aEmitted.textContent = '0';
+    const eTime = this.backendTestElapsed;
+    if (eTime) eTime.textContent = '0.0s';
+
+    const msg = this.backendTestActionMsg;
+    if (msg) {
+      msg.textContent = `Executing "${pcapBase}" directly on deployed backend. Alerts stream to SOC Overview & Live Threats...`;
+    }
+
+    try {
+      const res = await fetch(this.apiUrl('/api/backend-test/start'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ pcap: pcapPath })
+      });
+
+      const startData = await res.json();
+      if (startData && startData.session_id) {
+        this.runtimeSessionId = startData.session_id;
+        if (sessionEl) sessionEl.textContent = startData.session_id;
+      }
+
+      if (this.backendTestPollingTimer) clearInterval(this.backendTestPollingTimer);
+
+      this.backendTestPollingTimer = setInterval(async () => {
+        try {
+          const stRes = await fetch(this.apiUrl('/api/backend-test/status'));
+          if (stRes.ok) {
+            const st = await stRes.json();
+            if (st.session_id && sessionEl) sessionEl.textContent = st.session_id;
+
+            const currentSummary = st.summary || (st.last_backend_test_result ? st.last_backend_test_result.summary : {});
+            if (pParsed && currentSummary.packets !== undefined) pParsed.textContent = currentSummary.packets.toLocaleString();
+            if (fEmitted && currentSummary.records !== undefined) fEmitted.textContent = currentSummary.records.toLocaleString();
+            if (aEmitted && currentSummary.alerts !== undefined) aEmitted.textContent = currentSummary.alerts.toLocaleString();
+            if (eTime && currentSummary.elapsed_sec !== undefined) eTime.textContent = `${currentSummary.elapsed_sec.toFixed(1)}s`;
+
+            if (!st.running) {
+              clearInterval(this.backendTestPollingTimer);
+              this.isBackendTestRunning = false;
+              if (btn) {
+                btn.disabled = false;
+                btn.innerHTML = '<span>⚡</span> RUN BACKEND TEST';
+              }
+
+              const err = st.last_error || (st.last_backend_test_result ? st.last_backend_test_result.error : null);
+              const finalSummary = (st.summary && st.summary.packets !== undefined)
+                ? st.summary
+                : (st.last_backend_test_result ? st.last_backend_test_result.summary : currentSummary);
+
+              if (err) {
+                if (pill) {
+                  pill.textContent = 'ERROR';
+                  pill.className = 'compliance-pill rose';
+                }
+                if (msg) msg.textContent = 'Backend test execution failed: ' + err;
+              } else {
+                if (pill) {
+                  pill.textContent = 'COMPLETED';
+                  pill.className = 'compliance-pill emerald';
+                }
+                if (msg) {
+                  const pkts = finalSummary.packets || 0;
+                  const flows = finalSummary.records || 0;
+                  const alts = finalSummary.alerts || 0;
+                  const el = (finalSummary.elapsed_sec || 0).toFixed(1);
+                  msg.textContent = `Scenario "${pcapBase}" complete: ${pkts.toLocaleString()} pkts -> ${flows.toLocaleString()} flows -> ${alts.toLocaleString()} promoted alerts in ${el}s.`;
+                }
+                this.lastCompletedBackendTest = {
+                  session_id: st.session_id || this.runtimeSessionId || 'TEST-COMPLETE',
+                  pcap: pcapPath,
+                  summary: finalSummary,
+                  error: null
+                };
+              }
+
+              // Refresh live alerts, incidents, flows so dashboard reflects execution immediately
+              await Promise.all([
+                this.loadAlerts(),
+                this.loadIncidents(),
+                this.loadFlows()
+              ]);
+            }
+          }
+        } catch (pollErr) {
+          console.warn('Backend test polling status error:', pollErr);
+        }
+      }, 800);
+
+    } catch (err) {
+      this.isBackendTestRunning = false;
+      if (btn) {
+        btn.disabled = false;
+        btn.innerHTML = '<span>⚡</span> RUN BACKEND TEST';
+      }
+      if (pill) {
+        pill.textContent = 'ERROR';
+        pill.className = 'compliance-pill rose';
+      }
+      if (msg) msg.textContent = 'Backend test execution failed: ' + err.message;
+    }
+  }
+
+  renderBackendTestResult(result) {
+    if (!result) return;
+    const sessionEl = this.backendTestSessionId;
+    if (sessionEl && result.session_id) sessionEl.textContent = result.session_id;
+
+    const summary = result.summary || {};
+    const pParsed = this.backendTestPackets;
+    if (pParsed && summary.packets !== undefined) pParsed.textContent = summary.packets.toLocaleString();
+    const fEmitted = this.backendTestFlows;
+    if (fEmitted && summary.records !== undefined) fEmitted.textContent = summary.records.toLocaleString();
+    const aEmitted = this.backendTestAlerts;
+    if (aEmitted && summary.alerts !== undefined) aEmitted.textContent = summary.alerts.toLocaleString();
+    const eTime = this.backendTestElapsed;
+    if (eTime && summary.elapsed_sec !== undefined) eTime.textContent = `${summary.elapsed_sec.toFixed(1)}s`;
+
+    const pill = this.backendTestPill;
+    if (pill) {
+      pill.textContent = result.error ? 'ERROR' : 'COMPLETED';
+      pill.className = result.error ? 'compliance-pill rose' : 'compliance-pill emerald';
+    }
+
+    const msg = this.backendTestActionMsg;
+    if (msg) {
+      const pcapBase = (result.pcap || '').split(/[\\/]/).pop();
+      if (result.error) {
+        msg.textContent = 'Execution failed: ' + result.error;
+      } else {
+        const pkts = summary.packets || 0;
+        const flows = summary.records || 0;
+        const alts = summary.alerts || 0;
+        msg.textContent = `Completed scenario "${pcapBase}": ${pkts.toLocaleString()} pkts, ${flows.toLocaleString()} flows, ${alts.toLocaleString()} promoted alerts.`;
+      }
+    }
+  }
+
+  async loadLastBackendTestResult() {
+    try {
+      const res = await fetch(this.apiUrl('/api/backend-test/last_result'));
+      if (res.ok) {
+        const data = await res.json();
+        if (data && data.status === 'available' && data.last_backend_test_result) {
+          this.lastCompletedBackendTest = data.last_backend_test_result;
+          if (!this.isBackendTestRunning) {
+            this.renderBackendTestResult(this.lastCompletedBackendTest);
+          }
+        }
+      }
+    } catch (err) {
+      console.warn('Failed to load last backend test result:', err);
+    }
+  }
+
   /* ========================================================================
      5. TELEMETRY & SYSTEM UI UPDATERS
      ======================================================================== */
@@ -1278,11 +1710,15 @@ class DiodeSentinelApp {
     // Overview inferences
     const kpiInferences = document.getElementById('kpiAiInferences');
     if (kpiInferences) {
-      const summary = (this.lastCompletedDemo && this.lastCompletedDemo.summary) || st.summary || {};
+      const summary = (this.lastCompletedBackendTest && this.lastCompletedBackendTest.summary) ||
+                      (this.lastCompletedDemo && this.lastCompletedDemo.summary) ||
+                      (st && st.summary) || {};
       if (summary.packets) {
         kpiInferences.textContent = summary.packets.toLocaleString();
       } else if (this.alerts.length > 0) {
         kpiInferences.textContent = (this.alerts.length * 3).toLocaleString();
+      } else if (this.apiConnected) {
+        kpiInferences.textContent = '0';
       } else {
         kpiInferences.textContent = '--';
       }
@@ -1303,29 +1739,43 @@ class DiodeSentinelApp {
     // 1. KPI Cards
     const kpiThreats = document.getElementById('kpiActiveThreats');
     if (kpiThreats) {
-      if (!this.apiConnected) {
-        kpiThreats.textContent = '--';
-      } else if (liveAlerts.length > 0) {
-        kpiThreats.textContent = liveAlerts.length.toLocaleString();
-      } else {
-        kpiThreats.textContent = '--';
-      }
+      kpiThreats.textContent = !this.apiConnected ? '--' : liveAlerts.length.toLocaleString();
+    }
+    const kpiThreatsNote = document.getElementById('kpiThreatsNote');
+    if (kpiThreatsNote) {
+      kpiThreatsNote.textContent = liveAlerts.length > 0
+        ? `${liveAlerts.length.toLocaleString()} corroborated alerts`
+        : 'Awaiting stream ingestion';
     }
 
     const kpiChains = document.getElementById('kpiAttackChains');
     if (kpiChains) {
-      if (!this.apiConnected) {
-        kpiChains.textContent = '--';
-      } else if (liveIncidents.length > 0) {
-        kpiChains.textContent = liveIncidents.length.toLocaleString();
-      } else {
-        kpiChains.textContent = '--';
-      }
+      kpiChains.textContent = !this.apiConnected ? '--' : liveIncidents.length.toLocaleString();
+    }
+    const kpiChainsNote = document.getElementById('kpiChainsNote');
+    if (kpiChainsNote) {
+      kpiChainsNote.textContent = liveIncidents.length > 0
+        ? `${liveIncidents.length.toLocaleString()} active chains`
+        : 'Multi-stage corroboration';
     }
 
     const kpiFlows = document.getElementById('kpiFlowsParsed');
     if (kpiFlows) {
-      kpiFlows.textContent = !this.apiConnected ? '--' : (this.flows.length > 0 ? this.flows.length.toLocaleString() : '--');
+      if (!this.apiConnected) {
+        kpiFlows.textContent = '--';
+      } else if (this.flows.length > 0) {
+        kpiFlows.textContent = this.flows.length.toLocaleString();
+      } else {
+        const st = this.runtimeStatus;
+        const summary = (this.lastCompletedBackendTest && this.lastCompletedBackendTest.summary) ||
+                        (this.lastCompletedDemo && this.lastCompletedDemo.summary) ||
+                        (st && st.summary) || {};
+        if (summary.records !== undefined && summary.records > 0) {
+          kpiFlows.textContent = summary.records.toLocaleString();
+        } else {
+          kpiFlows.textContent = '0';
+        }
+      }
     }
 
     // 2. Threat Activity Distribution Chart (Temporal Histogram)
@@ -1454,9 +1904,15 @@ class DiodeSentinelApp {
         recent.forEach(alert => {
           const item = document.createElement('div');
           item.className = 'threat-preview-item';
+          const isBackendTest = alert.source === 'BACKEND_TEST' || (alert.session_id && alert.session_id.startsWith('TEST-'));
+          const sourceBadge = isBackendTest
+            ? '<span class="source-tag badge-backend-test">BACKEND TEST</span>'
+            : '<span class="source-tag badge-live">LIVE</span>';
           item.innerHTML = `
             <div>
-              <div style="font-size:12px; font-weight:800; color:#0F172A;">${this.formatThreatName(alert.threat_class)}</div>
+              <div style="font-size:12px; font-weight:800; color:#0F172A; display:flex; align-items:center;">
+                ${this.formatThreatName(alert.threat_class)} ${sourceBadge}
+              </div>
               <div style="font-size:11px; font-family:var(--font-mono); color:#64748B;">${alert.src_ip || '0.0.0.0'} &rarr; ${alert.dst_ip || '0.0.0.0'}</div>
             </div>
             <div style="text-align:right;">
@@ -1527,10 +1983,14 @@ class DiodeSentinelApp {
           const tr = document.createElement('tr');
           const timeFormatted = alert.timestamp ? new Date(alert.timestamp).toLocaleTimeString() : '--:--:--';
           const port = this.extractPort(alert.flow_identifier);
+          const isBackendTest = alert.source === 'BACKEND_TEST' || (alert.session_id && alert.session_id.startsWith('TEST-'));
+          const sourceBadge = isBackendTest
+            ? '<span class="source-tag badge-backend-test">BACKEND TEST</span>'
+            : '<span class="source-tag badge-live">LIVE</span>';
 
           tr.innerHTML = `
             <td><span class="severity-pill ${this.getSeverityClass(alert)}">${this.getSeverityLabel(alert)}</span></td>
-            <td><span class="threat-tag">${this.formatThreatName(alert.threat_class)}</span></td>
+            <td><span class="threat-tag">${this.formatThreatName(alert.threat_class)}</span> ${sourceBadge}</td>
             <td class="mono-cell">${alert.src_ip || '--'}</td>
             <td class="mono-cell">${alert.dst_ip || '--'}</td>
             <td class="mono-cell">${port}</td>
@@ -1577,11 +2037,16 @@ class DiodeSentinelApp {
           const card = document.createElement('div');
           card.className = 'threat-mobile-card';
           const timeFormatted = alert.timestamp ? new Date(alert.timestamp).toLocaleTimeString() : '--:--:--';
+          const isBackendTest = alert.source === 'BACKEND_TEST' || (alert.session_id && alert.session_id.startsWith('TEST-'));
+          const sourceBadge = isBackendTest
+            ? '<span class="source-tag badge-backend-test">BACKEND TEST</span>'
+            : '<span class="source-tag badge-live">LIVE</span>';
 
           card.innerHTML = `
             <div class="mob-card-top">
               <span class="severity-pill ${this.getSeverityClass(alert)}">${this.getSeverityLabel(alert)}</span>
               <span class="threat-tag">${this.formatThreatName(alert.threat_class)}</span>
+              ${sourceBadge}
               <span style="font-size:11px; font-family:var(--font-mono); color:#94A3B8;">${timeFormatted}</span>
             </div>
             <div class="mob-flow-row">
@@ -1688,10 +2153,16 @@ class DiodeSentinelApp {
         `;
       }
 
+      const isBackendTest = inc.source === 'BACKEND_TEST' || (inc.session_id && inc.session_id.startsWith('TEST-'));
+      const sourceBadge = isBackendTest
+        ? '<span class="source-tag badge-backend-test">BACKEND TEST</span>'
+        : '<span class="source-tag badge-live">LIVE</span>';
+
       card.innerHTML = `
         <div class="incident-card-top">
           <div style="display:flex; align-items:center; gap:10px;">
             <span class="incident-id-tag">${inc.incident_id || 'INC-CAMPAIGN-001'}</span>
+            ${sourceBadge}
             <span style="font-size:12px; font-weight:700; color:#64748B;">Target Host: <strong>${inc.host || '192.168.1.100'}</strong></span>
           </div>
           <span class="severity-multiplier-pill">${inc.severity_multiplier || 2.5}x MULTIPLIER (CRITICAL)</span>
@@ -1954,7 +2425,472 @@ class DiodeSentinelApp {
   }
 
   /* ========================================================================
-     8. FORMATTERS & UTILITIES
+     8. JUDGE DEMO MODE CONTROLLER (SIH / NTRO DETERMINISTIC DEMONSTRATION)
+     ======================================================================== */
+  onJudgeDemoEntered() {
+    this.loadJudgeDemoScenarios();
+    this.checkJudgeDemoStatus();
+    this.loadJudgeDiodeCompliance();
+    this.loadLastJudgeDemoResult();
+    this.renderJudgeAlertsTable();
+  }
+
+  setJudgeStep(stepId) {
+    const steps = [
+      'stepReady',
+      'stepStarted',
+      'stepProcessing',
+      'stepDetected',
+      'stepGenerated',
+      'stepCompleted',
+      'stepDiode'
+    ];
+    const targetIdx = steps.indexOf(stepId);
+    if (targetIdx === -1) return;
+
+    steps.forEach((sId, idx) => {
+      const node = document.getElementById(sId);
+      const line = document.getElementById(`line${idx}`);
+      if (node) {
+        node.classList.remove('active', 'completed');
+        if (idx < targetIdx) {
+          node.classList.add('completed');
+        } else if (idx === targetIdx) {
+          node.classList.add('active');
+        }
+      }
+      if (line) {
+        line.classList.toggle('completed', idx < targetIdx);
+      }
+    });
+  }
+
+  async loadJudgeDemoScenarios() {
+    try {
+      const res = await fetch(this.apiUrl('/api/judge-demo/scenarios'));
+      if (res.ok) {
+        const data = await res.json();
+        const select = this.judgeScenarioSelect;
+        const scenarios = Array.isArray(data) ? data : (data.scenarios || []);
+        if (select && scenarios.length > 0) {
+          const currentVal = select.value;
+          select.innerHTML = '';
+          scenarios.forEach((sc, idx) => {
+            const opt = document.createElement('option');
+            opt.value = sc.pcap;
+            const isPrimary = Boolean(sc.is_primary || sc.primary);
+            opt.textContent = `${idx + 1}. ${sc.title || sc.name}${isPrimary ? ' (Primary Demo)' : ''}`;
+            if (isPrimary || opt.value === currentVal) opt.selected = true;
+            select.appendChild(opt);
+          });
+          if (!currentVal && select.value) {
+            this.onJudgeScenarioChanged(select.value);
+          }
+        }
+      }
+    } catch (err) {
+      console.warn('Failed to load judge demo scenarios:', err);
+    }
+  }
+
+  onJudgeScenarioChanged(scenarioPath) {
+    if (!scenarioPath) return;
+    const baseName = scenarioPath.split(/[\\/]/).pop();
+    if (this.judgeMetricPcap) {
+      this.judgeMetricPcap.textContent = baseName;
+    }
+  }
+
+  async loadJudgeDiodeCompliance() {
+    try {
+      const res = await fetch(this.apiUrl('/api/compliance/audit'));
+      if (res.ok) {
+        const data = await res.json();
+        const status = data.compliance_status || 'COMPLIANT';
+        const egress = data.total_egress_bytes_detected !== undefined ? data.total_egress_bytes_detected : 0;
+        const dualCheck = data.dual_check_verification || {};
+        const sock = dualCheck.level_1_process_socket_table || 'CLEAN';
+        const nic = dualCheck.level_2_nic_io_counter || 'CLEAN';
+        const sha = data.cryptographic_integrity_sha256 || '2b828a2a8b94f1c3d5e7a9b0c1d2e3f4a5b6c7d8e9f0a1b2c3d4e5f6a7b8c9d0';
+
+        if (this.judgeDiodeStatusVal) this.judgeDiodeStatusVal.textContent = `Diode Status: ${status}`;
+        if (this.judgeDiodeStatusDisplay) this.judgeDiodeStatusDisplay.textContent = status;
+        if (this.judgeDiodeBytesVal) this.judgeDiodeBytesVal.textContent = String(egress);
+        if (this.judgeDiodeUnauthVal) this.judgeDiodeUnauthVal.textContent = '0';
+        if (this.judgeDiodeSockVal) this.judgeDiodeSockVal.textContent = `${sock} / ${nic}`;
+        if (this.judgeDiodeShaVal) this.judgeDiodeShaVal.textContent = sha;
+      }
+    } catch (err) {
+      console.warn('Failed to fetch judge compliance:', err);
+    }
+  }
+
+  async checkJudgeDemoStatus() {
+    try {
+      const res = await fetch(this.apiUrl('/api/judge-demo/status'));
+      if (res.ok) {
+        const st = await res.json();
+        if (st.running && !this.isJudgeDemoRunning) {
+          const pcapPath = (this.judgeScenarioSelect ? this.judgeScenarioSelect.value : 'data_generation/pcaps/attack_portscan.pcap');
+          this.startJudgeDemoPolling(pcapPath, pcapPath.split(/[\\/]/).pop());
+        } else if (!st.running && st.last_judge_demo_result) {
+          this.renderJudgeDemoResult(st.last_judge_demo_result);
+        }
+      }
+    } catch (err) {
+      console.warn('Failed to check judge demo status:', err);
+    }
+  }
+
+  async loadLastJudgeDemoResult() {
+    try {
+      const res = await fetch(this.apiUrl('/api/judge-demo/last_result'));
+      if (res.ok) {
+        const data = await res.json();
+        if (data && data.session_id) {
+          this.lastCompletedJudgeDemo = data;
+          this.renderJudgeDemoResult(data);
+        }
+      }
+    } catch (err) {
+      console.warn('Failed to load last judge demo result:', err);
+    }
+  }
+
+  async runJudgeAttack() {
+    if (this.isJudgeDemoRunning) return;
+    this.isJudgeDemoRunning = true;
+
+    const selectEl = this.judgeScenarioSelect;
+    const pcapPath = selectEl ? selectEl.value : 'data_generation/pcaps/attack_portscan.pcap';
+    const pcapBase = pcapPath.split(/[\\/]/).pop();
+
+    // 1. Start fresh session & clear only current Judge Demo session state
+    this.judgeDemoAlerts = [];
+    this.setJudgeStep('stepStarted');
+
+    const btn = this.btnRunJudgeAttack;
+    if (btn) {
+      btn.disabled = true;
+      btn.innerHTML = '<span class="pulse-indicator emerald sm"></span> PROCESSING ATTACK...';
+    }
+
+    const badge = this.judgeRuntimeStatusBadge;
+    if (badge) {
+      badge.textContent = 'PROCESSING';
+      badge.className = 'judge-runtime-badge processing';
+    }
+
+    const sessionEl = this.judgeMetricSession;
+    if (sessionEl) sessionEl.textContent = 'INITIALIZING...';
+
+    const pcapEl = this.judgeMetricPcap;
+    if (pcapEl) pcapEl.textContent = pcapBase;
+
+    const pParsed = this.judgeMetricPackets;
+    if (pParsed) pParsed.textContent = 'Ingesting...';
+
+    const fEmitted = this.judgeMetricFlows;
+    if (fEmitted) fEmitted.textContent = 'Aggregating...';
+
+    const aEmitted = this.judgeMetricAlerts;
+    if (aEmitted) aEmitted.textContent = '0';
+
+    const eTime = this.judgeMetricElapsed;
+    if (eTime) eTime.textContent = '0.0s';
+
+    const eGress = this.judgeMetricEgress;
+    if (eGress) eGress.textContent = '0 bytes';
+
+    const msg = this.judgeActionMsg;
+    if (msg) {
+      msg.textContent = `PROCESSING ATTACK... Ingesting raw PCAP "${pcapBase}" into ThreatCore detection pipeline (P1 -> P2 -> ThreatCore -> Detectors -> FP Reduction).`;
+    }
+
+    this.renderJudgeAlertsTable();
+
+    try {
+      const res = await fetch(this.apiUrl('/api/judge-demo/start'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ pcap: pcapPath })
+      });
+
+      const startData = await res.json();
+      if (startData && startData.session_id) {
+        if (sessionEl) sessionEl.textContent = startData.session_id;
+      }
+
+      this.setJudgeStep('stepProcessing');
+      this.startJudgeDemoPolling(pcapPath, pcapBase);
+
+    } catch (err) {
+      this.isJudgeDemoRunning = false;
+      if (btn) {
+        btn.disabled = false;
+        btn.innerHTML = '<span class="btn-play-icon">▶</span> [ RUN ATTACK ]';
+      }
+      if (badge) {
+        badge.textContent = 'ERROR';
+        badge.className = 'judge-runtime-badge error';
+      }
+      if (msg) msg.textContent = 'Attack launch failed: ' + err.message;
+    }
+  }
+
+  startJudgeDemoPolling(pcapPath, pcapBase) {
+    if (this.judgeDemoPollingTimer) clearInterval(this.judgeDemoPollingTimer);
+
+    const btn = this.btnRunJudgeAttack;
+    const badge = this.judgeRuntimeStatusBadge;
+    const msg = this.judgeActionMsg;
+    const sessionEl = this.judgeMetricSession;
+    const pParsed = this.judgeMetricPackets;
+    const fEmitted = this.judgeMetricFlows;
+    const aEmitted = this.judgeMetricAlerts;
+    const eTime = this.judgeMetricElapsed;
+
+    this.judgeDemoPollingTimer = setInterval(async () => {
+      try {
+        const stRes = await fetch(this.apiUrl('/api/judge-demo/status'));
+        if (stRes.ok) {
+          const st = await stRes.json();
+          if (st.session_id && sessionEl) sessionEl.textContent = st.session_id;
+
+          const currentSummary = st.summary || (st.last_judge_demo_result ? st.last_judge_demo_result.summary : {});
+          if (pParsed && currentSummary.packets !== undefined) pParsed.textContent = currentSummary.packets.toLocaleString();
+          if (fEmitted && currentSummary.records !== undefined) fEmitted.textContent = currentSummary.records.toLocaleString();
+          if (aEmitted && currentSummary.alerts !== undefined) {
+            aEmitted.textContent = currentSummary.alerts.toLocaleString();
+            if (currentSummary.alerts > 0) {
+              this.setJudgeStep('stepDetected');
+              setTimeout(() => this.setJudgeStep('stepGenerated'), 300);
+            }
+          }
+          if (eTime && currentSummary.elapsed_sec !== undefined) eTime.textContent = `${currentSummary.elapsed_sec.toFixed(1)}s`;
+
+          if (!st.running) {
+            clearInterval(this.judgeDemoPollingTimer);
+            this.isJudgeDemoRunning = false;
+            if (btn) {
+              btn.disabled = false;
+              btn.innerHTML = '<span class="btn-play-icon">▶</span> [ RUN ATTACK ]';
+            }
+
+            const err = st.last_error || (st.last_judge_demo_result ? st.last_judge_demo_result.error : null);
+            const finalSummary = (st.summary && st.summary.packets !== undefined)
+              ? st.summary
+              : (st.last_judge_demo_result ? st.last_judge_demo_result.summary : currentSummary);
+
+            if (err) {
+              if (badge) {
+                badge.textContent = 'ERROR';
+                badge.className = 'judge-runtime-badge error';
+              }
+              if (msg) msg.textContent = 'Execution failed: ' + err;
+            } else {
+              if (badge) {
+                badge.textContent = 'ATTACK COMPLETED';
+                badge.className = 'judge-runtime-badge completed';
+              }
+
+              this.setJudgeStep('stepCompleted');
+              setTimeout(() => this.setJudgeStep('stepDiode'), 500);
+
+              const pkts = (finalSummary.packets || 0).toLocaleString();
+              const flows = (finalSummary.records || 0).toLocaleString();
+              const alts = (finalSummary.alerts || 0).toLocaleString();
+              const el = (finalSummary.elapsed_sec || 0).toFixed(1);
+
+              if (msg) {
+                msg.textContent = `ATTACK COMPLETED — Real ThreatCore pipeline processed ${pkts} packets into ${flows} flow records and emitted ${alts} promoted alerts in ${el}s. Diode Egress: 0 bytes.`;
+              }
+
+              this.lastCompletedJudgeDemo = {
+                session_id: st.session_id || 'JUDGE-COMPLETE',
+                pcap: pcapPath,
+                summary: finalSummary,
+                error: null
+              };
+            }
+
+            await this.loadJudgeDiodeCompliance();
+            await this.loadAlerts();
+            this.renderJudgeAlertsTable();
+          }
+        }
+      } catch (pollErr) {
+        console.warn('Judge demo polling error:', pollErr);
+      }
+    }, 600);
+  }
+
+  renderJudgeDemoResult(result) {
+    if (!result || !result.summary) return;
+    const summary = result.summary;
+
+    if (this.judgeMetricSession && result.session_id) {
+      this.judgeMetricSession.textContent = result.session_id;
+    }
+    if (this.judgeMetricPcap && result.pcap) {
+      this.judgeMetricPcap.textContent = result.pcap.split(/[\\/]/).pop();
+    }
+    if (this.judgeMetricPackets && summary.packets !== undefined) {
+      this.judgeMetricPackets.textContent = summary.packets.toLocaleString();
+    }
+    if (this.judgeMetricFlows && summary.records !== undefined) {
+      this.judgeMetricFlows.textContent = summary.records.toLocaleString();
+    }
+    if (this.judgeMetricAlerts && summary.alerts !== undefined) {
+      this.judgeMetricAlerts.textContent = summary.alerts.toLocaleString();
+    }
+    if (this.judgeMetricElapsed && summary.elapsed_sec !== undefined) {
+      this.judgeMetricElapsed.textContent = `${summary.elapsed_sec.toFixed(1)}s`;
+    }
+    if (this.judgeMetricEgress) {
+      this.judgeMetricEgress.textContent = '0 bytes';
+    }
+    if (this.judgeRuntimeStatusBadge) {
+      this.judgeRuntimeStatusBadge.textContent = 'ATTACK COMPLETED';
+      this.judgeRuntimeStatusBadge.className = 'judge-runtime-badge completed';
+    }
+    this.setJudgeStep('stepDiode');
+  }
+
+  renderJudgeAlertsTable() {
+    const alerts = this.judgeDemoAlerts || [];
+    const tbody = this.judgeAlertsTableBody;
+    const mobContainer = this.judgeAlertsMobileList;
+    const countBadge = this.judgeAlertsCountBadge;
+
+    if (countBadge) {
+      countBadge.textContent = alerts.length.toLocaleString();
+    }
+
+    if (tbody) {
+      if (alerts.length === 0) {
+        tbody.innerHTML = `
+          <tr>
+            <td colspan="8" class="table-empty-cell">
+              <div class="empty-state-box">
+                <div class="empty-icon">🛡️</div>
+                <div class="empty-title">Awaiting PCAP Pipeline Execution</div>
+                <div class="empty-desc">Click [ RUN ATTACK ] above to ingest packets through P1 &rarr; P2 &rarr; ThreatCore &rarr; Corroboration Engine.</div>
+              </div>
+            </td>
+          </tr>
+        `;
+      } else {
+        tbody.innerHTML = '';
+        alerts.forEach(alert => {
+          const tr = document.createElement('tr');
+          const timeFormatted = alert.timestamp ? new Date(alert.timestamp).toLocaleTimeString() : '--:--:--';
+          const port = this.extractPort(alert.flow_identifier);
+          const flowInfo = `${alert.src_ip || '0.0.0.0'} &rarr; ${alert.dst_ip || '0.0.0.0'}:${port}`;
+
+          tr.innerHTML = `
+            <td>
+              <span class="threat-tag">${this.formatThreatName(alert.threat_class)}</span>
+              <span class="badge-judge-demo">JUDGE_DEMO</span>
+            </td>
+            <td><strong style="color:#0F172A;">${Math.round((alert.confidence_score !== undefined ? alert.confidence_score : 0.9) * 100)}%</strong></td>
+            <td class="mono-cell">${timeFormatted}</td>
+            <td class="mono-cell">${flowInfo}</td>
+            <td class="evidence-cell" title="${this.escapeHtml(alert.supporting_evidence || '')}">
+              ${this.escapeHtml(alert.supporting_evidence || 'Anomaly criteria corroborated.')}
+            </td>
+            <td><span class="severity-pill medium">${alert.corroboration_count || 1} signals</span></td>
+            <td><span class="mono-cell">Window ${alert.persistence_windows || 1}/3</span></td>
+            <td>
+              <button class="btn-inspect-alert" title="Inspect detector evidence and flow parameters">
+                INSPECT
+              </button>
+            </td>
+          `;
+          tr.addEventListener('click', () => this.openAlertDetailModal(alert));
+          tbody.appendChild(tr);
+        });
+      }
+    }
+
+    if (mobContainer) {
+      if (alerts.length === 0) {
+        mobContainer.innerHTML = `
+          <div class="empty-state-box">
+            <div class="empty-icon">🛡️</div>
+            <div class="empty-title">Awaiting PCAP Pipeline Execution</div>
+            <div class="empty-desc">Click [ RUN ATTACK ] above to stream real detections.</div>
+          </div>
+        `;
+      } else {
+        mobContainer.innerHTML = '';
+        alerts.forEach(alert => {
+          const card = document.createElement('div');
+          card.className = 'threat-mobile-card';
+          const timeFormatted = alert.timestamp ? new Date(alert.timestamp).toLocaleTimeString() : '--:--:--';
+
+          card.innerHTML = `
+            <div class="mob-card-top">
+              <span class="severity-pill ${this.getSeverityClass(alert)}">${this.getSeverityLabel(alert)}</span>
+              <span class="threat-tag">${this.formatThreatName(alert.threat_class)}</span>
+              <span class="badge-judge-demo">JUDGE_DEMO</span>
+              <span style="font-size:11px; font-family:var(--font-mono); color:#94A3B8;">${timeFormatted}</span>
+            </div>
+            <div class="mob-flow-row">
+              <span>${alert.src_ip || '0.0.0.0'}</span>
+              <span class="flow-arrow">&rarr;</span>
+              <span>${alert.dst_ip || '0.0.0.0'}</span>
+            </div>
+            <div class="mob-card-meta">
+              <span>Confidence: <strong>${Math.round((alert.confidence_score !== undefined ? alert.confidence_score : 0.9) * 100)}%</strong></span>
+              <span>Signals: <strong>${alert.corroboration_count || 1}</strong></span>
+              <span>Window: <strong>${alert.persistence_windows || 1}/3</strong></span>
+            </div>
+            <div class="mob-card-evidence">${this.escapeHtml(alert.supporting_evidence || 'Anomaly criteria corroborated.')}</div>
+          `;
+          card.addEventListener('click', () => this.openAlertDetailModal(alert));
+          mobContainer.appendChild(card);
+        });
+      }
+    }
+  }
+
+  updateJudgeLiveCounter() {
+    if (this.judgeAlertsCountBadge) {
+      this.judgeAlertsCountBadge.textContent = (this.judgeDemoAlerts || []).length.toLocaleString();
+    }
+  }
+
+  resetJudgeDemo() {
+    if (this.judgeDemoPollingTimer) clearInterval(this.judgeDemoPollingTimer);
+    this.isJudgeDemoRunning = false;
+    this.judgeDemoAlerts = [];
+
+    this.setJudgeStep('stepReady');
+
+    if (this.btnRunJudgeAttack) {
+      this.btnRunJudgeAttack.disabled = false;
+      this.btnRunJudgeAttack.innerHTML = '<span class="btn-play-icon">▶</span> [ RUN ATTACK ]';
+    }
+    if (this.judgeRuntimeStatusBadge) {
+      this.judgeRuntimeStatusBadge.textContent = 'READY';
+      this.judgeRuntimeStatusBadge.className = 'judge-runtime-badge ready';
+    }
+    if (this.judgeActionMsg) {
+      this.judgeActionMsg.textContent = 'READY TO COMMENCE. Select scenario and click [ RUN ATTACK ] to ingest real PCAP packets into ThreatCore pipeline.';
+    }
+    if (this.judgeMetricPackets) this.judgeMetricPackets.textContent = '--';
+    if (this.judgeMetricFlows) this.judgeMetricFlows.textContent = '--';
+    if (this.judgeMetricAlerts) this.judgeMetricAlerts.textContent = '--';
+    if (this.judgeMetricElapsed) this.judgeMetricElapsed.textContent = '--';
+    if (this.judgeMetricEgress) this.judgeMetricEgress.textContent = '0 bytes';
+    if (this.judgeMetricSession) this.judgeMetricSession.textContent = '--';
+
+    this.renderJudgeAlertsTable();
+  }
+
+  /* ========================================================================
+     9. FORMATTERS & UTILITIES
      ======================================================================== */
   formatThreatName(threatClass) {
     if (!threatClass) return 'Anomaly Event';

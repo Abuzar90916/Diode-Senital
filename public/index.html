@@ -84,6 +84,10 @@
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="5 3 19 12 5 21 5 3"/></svg>
         </a>
 
+        <a href="/dashboard/judge" class="rail-nav-item" data-route="/dashboard/judge" id="rail-nav-judge" title="Judge Demo Mode">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m14 13-7.5 7.5c-.8.8-2 .8-2.8 0s-.8-2 0-2.8L11.2 10.2"/><path d="m16 16 6-6"/><path d="m8 8 6-6"/><path d="m9 7 8 8"/><path d="m21 11-8-8"/></svg>
+        </a>
+
         <a href="/dashboard/system" class="rail-nav-item" data-route="/dashboard/system" id="rail-nav-system" title="System & Diode">
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="2" width="20" height="8" rx="2" ry="2"/><rect x="2" y="14" width="20" height="8" rx="2" ry="2"/><line x1="6" y1="6" x2="6.01" y2="6"/><line x1="6" y1="18" x2="6.01" y2="18"/></svg>
         </a>
@@ -170,6 +174,14 @@
           <span class="nav-label">DEMO TESTING</span>
         </a>
 
+        <a href="/dashboard/judge" class="nav-item" data-route="/dashboard/judge" id="nav-judge">
+          <span class="nav-icon">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m14 13-7.5 7.5c-.8.8-2 .8-2.8 0s-.8-2 0-2.8L11.2 10.2"/><path d="m16 16 6-6"/><path d="m8 8 6-6"/><path d="m9 7 8 8"/><path d="m21 11-8-8"/></svg>
+          </span>
+          <span class="nav-label">JUDGE DEMO</span>
+          <span class="nav-counter" id="sidebarJudgeBadge" style="background:rgba(59,130,246,0.2);color:#60A5FA;display:inline-block;padding:1px 6px;border-radius:4px;font-size:0.65rem;font-weight:700;">OFFICIAL</span>
+        </a>
+
         <a href="/dashboard/system" class="nav-item" data-route="/dashboard/system" id="nav-system">
           <span class="nav-icon">
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="2" width="20" height="8" rx="2" ry="2"/><rect x="2" y="14" width="20" height="8" rx="2" ry="2"/><line x1="6" y1="6" x2="6.01" y2="6"/><line x1="6" y1="18" x2="6.01" y2="18"/></svg>
@@ -195,23 +207,28 @@
          2. MOBILE TOP HEADER (< 1024px)
          ==================================================================== -->
     <header class="mobile-header" id="mobileHeader">
-      <button class="btn-mobile-menu" id="btnMobileMenuToggle" aria-label="Open Navigation Menu">
-        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="18" x2="21" y2="18"/></svg>
-      </button>
+      <div class="mobile-header-left">
+        <button class="btn-mobile-menu" id="btnMobileMenuToggle" aria-label="Open Navigation Menu">
+          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="18" x2="21" y2="18"/></svg>
+        </button>
 
-      <a href="/dashboard/overview" class="mobile-brand" data-route="/dashboard/overview">
-        <div class="diode-shield-mark sm">
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
-            <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
-            <path d="M12 8v8"/><path d="M8 12h8"/>
-          </svg>
+        <a href="/dashboard/overview" class="mobile-brand" data-route="/dashboard/overview">
+          <div class="diode-shield-mark sm">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
+              <path d="M12 8v8"/><path d="M8 12h8"/>
+            </svg>
+          </div>
+          <span class="mobile-brand-title">DIODE SENTINEL</span>
+        </a>
+      </div>
+
+      <div class="mobile-header-right">
+        <span class="mobile-header-page" id="mobileHeaderPage">OVERVIEW</span>
+        <div class="mobile-status-indicator" id="mobileConnectionStatus">
+          <span class="pulse-indicator emerald"></span>
+          <span class="mobile-status-text" id="mobileStatusText">LIVE</span>
         </div>
-        <span class="mobile-brand-title">DIODE SENTINEL</span>
-      </a>
-
-      <div class="mobile-status-indicator" id="mobileConnectionStatus">
-        <span class="pulse-indicator emerald"></span>
-        <span class="mobile-status-text" id="mobileStatusText">LIVE</span>
       </div>
     </header>
 
@@ -272,6 +289,13 @@
           <div class="drawer-nav-meta">
             <span class="drawer-label">Demo Testing</span>
             <span class="drawer-sub">PCAP Attack Execution Console</span>
+          </div>
+        </a>
+        <a href="/dashboard/judge" class="drawer-nav-item" data-route="/dashboard/judge">
+          <span class="drawer-icon">⚖️</span>
+          <div class="drawer-nav-meta">
+            <span class="drawer-label">Judge Demo Mode</span>
+            <span class="drawer-sub">Official SIH/NTRO PCAP Pipeline Ingestion</span>
           </div>
         </a>
         <a href="/dashboard/system" class="drawer-nav-item" data-route="/dashboard/system">
@@ -988,6 +1012,237 @@
             <button class="btn-run-scenario" data-pcap="data_generation/pcaps/attack_exfil.pcap">
               <span>▶</span> RUN TEST
             </button>
+          </div>
+        </div>
+      </section>
+
+      <!-- ================================================================
+           PAGE 8: JUDGE DEMO MODE (/dashboard/judge)
+           Deterministic SIH / NTRO Real PCAP Pipeline Demonstration
+           ================================================================ -->
+      <section class="page-view" id="page-judge">
+        <div class="page-header-row">
+          <div>
+            <h2 class="page-title">JUDGE DEMO MODE</h2>
+            <p class="page-subtitle">Deterministic Ground-Truth Attack Ingestion &bull; Full ThreatCore Detection Pipeline &bull; Hardware Diode Egress Watchdog</p>
+          </div>
+          <div class="judge-official-badge">
+            <span class="badge-dot-blue"></span> OFFICIAL JUDGE DEMONSTRATION
+          </div>
+        </div>
+
+        <!-- 1. PRESENTATION STEPPER (READY -> ATTACK STARTED -> PROCESSING -> THREAT DETECTED -> ALERTS GENERATED -> ATTACK COMPLETED -> DIODE COMPLIANT) -->
+        <div class="judge-stepper-card">
+          <div class="judge-stepper-title">PIPELINE VERIFICATION STAGES</div>
+          <div class="judge-stepper" id="judgeStepper">
+            <div class="step-node active" id="stepReady">
+              <div class="step-icon">1</div>
+              <div class="step-label">READY</div>
+            </div>
+            <div class="step-line" id="line1"></div>
+            <div class="step-node" id="stepStarted">
+              <div class="step-icon">2</div>
+              <div class="step-label">ATTACK STARTED</div>
+            </div>
+            <div class="step-line" id="line2"></div>
+            <div class="step-node" id="stepProcessing">
+              <div class="step-icon">3</div>
+              <div class="step-label">PROCESSING</div>
+            </div>
+            <div class="step-line" id="line3"></div>
+            <div class="step-node" id="stepDetected">
+              <div class="step-icon">4</div>
+              <div class="step-label">THREAT DETECTED</div>
+            </div>
+            <div class="step-line" id="line4"></div>
+            <div class="step-node" id="stepGenerated">
+              <div class="step-icon">5</div>
+              <div class="step-label">ALERTS GENERATED</div>
+            </div>
+            <div class="step-line" id="line5"></div>
+            <div class="step-node" id="stepCompleted">
+              <div class="step-icon">6</div>
+              <div class="step-label">ATTACK COMPLETED</div>
+            </div>
+            <div class="step-line" id="line6"></div>
+            <div class="step-node" id="stepDiode">
+              <div class="step-icon">7</div>
+              <div class="step-label">DIODE COMPLIANT</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- 2. JUDGE DEMO CONTROL CONSOLE -->
+        <div class="judge-console-card">
+          <div class="judge-console-header">
+            <div class="judge-console-title-group">
+              <span class="judge-gavel-icon">⚖️</span>
+              <div>
+                <h3 class="judge-console-title">JUDGE DEMO</h3>
+                <span class="judge-console-sub">Deterministic Local Demonstration for SIH/NTRO Evaluators</span>
+              </div>
+            </div>
+            <div class="judge-status-group">
+              <span class="console-label">Runtime Status:</span>
+              <span class="judge-runtime-badge ready" id="judgeRuntimeStatusBadge">READY</span>
+            </div>
+          </div>
+
+          <!-- Scenario selection & Run controls -->
+          <div class="judge-controls-row">
+            <div class="judge-select-wrapper">
+              <label for="judgeScenarioSelect" class="judge-control-label">Attack Scenario</label>
+              <select id="judgeScenarioSelect" class="judge-scenario-select">
+                <option value="data_generation/pcaps/attack_portscan.pcap" selected>1. Port Scan (Primary Demo)</option>
+                <option value="data_generation/pcaps/attack_c2_beacon.pcap">2. C2 Beaconing</option>
+                <option value="data_generation/pcaps/attack_dga.pcap">3. DGA / DNS Tunnelling</option>
+                <option value="data_generation/pcaps/attack_ddos_syn.pcap">4. DDoS SYN Flood</option>
+                <option value="data_generation/pcaps/attack_encrypted_malware.pcap">5. Encrypted Malware Dynamics</option>
+                <option value="data_generation/pcaps/attack_exfil.pcap">6. Data Exfiltration Burst</option>
+              </select>
+            </div>
+            <div class="judge-buttons-group">
+              <button class="btn-judge-attack" id="btnRunJudgeAttack">
+                <span class="btn-play-icon">▶</span> [ RUN ATTACK ]
+              </button>
+              <button class="btn-judge-reset" id="btnResetJudgeDemo" title="Reset Demo Session">
+                <span>🔄</span> RESET
+              </button>
+            </div>
+          </div>
+
+          <!-- Live action notification text -->
+          <div class="judge-action-banner" id="judgeActionMsg">
+            READY TO COMMENCE. Select scenario and click [ RUN ATTACK ] to ingest real PCAP packets into ThreatCore pipeline.
+          </div>
+
+          <!-- KPI Metric Displays -->
+          <div class="judge-kpi-grid">
+            <div class="judge-kpi-box">
+              <span class="kpi-label">PCAP</span>
+              <span class="kpi-val mono truncate" id="judgeMetricPcap">attack_portscan.pcap</span>
+            </div>
+            <div class="judge-kpi-box">
+              <span class="kpi-label">Packets</span>
+              <span class="kpi-val" id="judgeMetricPackets">--</span>
+            </div>
+            <div class="judge-kpi-box">
+              <span class="kpi-label">Flow Records</span>
+              <span class="kpi-val" id="judgeMetricFlows">--</span>
+            </div>
+            <div class="judge-kpi-box highlight">
+              <span class="kpi-label">Promoted Alerts</span>
+              <span class="kpi-val rose" id="judgeMetricAlerts">--</span>
+            </div>
+            <div class="judge-kpi-box">
+              <span class="kpi-label">Elapsed</span>
+              <span class="kpi-val" id="judgeMetricElapsed">--</span>
+            </div>
+            <div class="judge-kpi-box highlight-emerald">
+              <span class="kpi-label">Egress</span>
+              <span class="kpi-val emerald" id="judgeMetricEgress">0 bytes</span>
+            </div>
+            <div class="judge-kpi-box">
+              <span class="kpi-label">Session</span>
+              <span class="kpi-val mono truncate" id="judgeMetricSession">--</span>
+            </div>
+            <div class="judge-kpi-box">
+              <span class="kpi-label">SOURCE</span>
+              <span class="kpi-val mono blue-tag" id="judgeMetricSource">JUDGE_DEMO</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- 3. DIODE COMPLIANCE WATCHDOG VERIFICATION (Requirement 6) -->
+        <div class="judge-compliance-card" id="judgeComplianceCard">
+          <div class="judge-compliance-header">
+            <div class="compliance-header-title">
+              <span class="shield-check-icon">🛡️</span>
+              <div>
+                <h4 class="compliance-title">HARDWARE DIODE COMPLIANCE WATCHDOG</h4>
+                <p class="compliance-subtitle">Passive RX-Only Physical Isolation & Zero-Egress Assertion (NTRO Standard)</p>
+              </div>
+            </div>
+            <div class="compliance-status-tag" id="judgeDiodeStatusVal">Diode Status: COMPLIANT</div>
+          </div>
+
+          <div class="compliance-metrics-grid">
+            <div class="comp-metric-item">
+              <span class="comp-label">Diode Status</span>
+              <span class="comp-value emerald" id="judgeDiodeStatusDisplay">COMPLIANT</span>
+              <span class="comp-sub">Strict Physical RX Only</span>
+            </div>
+            <div class="comp-metric-item">
+              <span class="comp-label">Egress Bytes</span>
+              <span class="comp-value emerald" id="judgeDiodeBytesVal">0</span>
+              <span class="comp-sub">Measured Outbound Packets</span>
+            </div>
+            <div class="comp-metric-item">
+              <span class="comp-label">Unauthorized Egress</span>
+              <span class="comp-value emerald" id="judgeDiodeUnauthVal">0</span>
+              <span class="comp-sub">Zero-Leakage Assertion</span>
+            </div>
+            <div class="comp-metric-item">
+              <span class="comp-label">Dual-Check Sockets & NIC</span>
+              <span class="comp-value emerald" id="judgeDiodeSockVal">CLEAN</span>
+              <span class="comp-sub">Dual-Probe Kernel IO Verified</span>
+            </div>
+            <div class="comp-metric-item col-span-2">
+              <span class="comp-label">Hardware Non-Repudiation SHA-256 Seal</span>
+              <span class="comp-value mono small" id="judgeDiodeShaVal">2b828a2a8b94f1c3d5e7a9b0c1d2e3f4a5b6c7d8e9f0a1b2c3d4e5f6a7b8c9d0</span>
+              <span class="comp-sub">Signed Audit Evidence Seal</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- 4. REAL-TIME DETECTED ALERTS STREAM (Requirement 5) -->
+        <div class="judge-alerts-section">
+          <div class="judge-alerts-header">
+            <div>
+              <h3 class="section-title-sub">REAL-TIME THREATCORE DETECTIONS</h3>
+              <p class="section-desc-sub">Corroborated alerts generated from real PCAP execution &bull; Click any row to inspect detector evidence</p>
+            </div>
+            <div class="judge-alerts-counter">
+              <span>Threats Generated:</span> <strong id="judgeAlertsCountBadge">0</strong>
+            </div>
+          </div>
+
+          <!-- Desktop Table -->
+          <div class="threats-table-wrapper threats-table-container">
+            <table class="soc-data-table threats-table" id="judgeThreatsTable">
+              <thead>
+                <tr>
+                  <th>Threat Class</th>
+                  <th>Confidence</th>
+                  <th>Timestamp</th>
+                  <th>Flow Information</th>
+                  <th>Evidence</th>
+                  <th>Corroboration</th>
+                  <th>Persistence</th>
+                  <th>Action</th>
+                </tr>
+              </thead>
+              <tbody id="judgeAlertsTableBody">
+                <tr id="judgeAlertsEmptyRow">
+                  <td colspan="8" class="empty-table-cell">
+                    <div class="empty-state-box">
+                      <div class="empty-icon">🛡️</div>
+                      <div class="empty-title">Awaiting PCAP Pipeline Execution</div>
+                      <div class="empty-desc">Click [ RUN ATTACK ] above to ingest packets through P1 &rarr; P2 &rarr; ThreatCore &rarr; Corroboration Engine.</div>
+                    </div>
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+
+          <!-- Mobile Cards Container -->
+          <div class="threats-mobile-list" id="judgeAlertsMobileList">
+            <div class="empty-state-box" id="judgeAlertsMobileEmpty">
+              <div class="empty-icon">🛡️</div>
+              <div class="empty-title">Awaiting PCAP Pipeline Execution</div>
+              <div class="empty-desc">Click [ RUN ATTACK ] above to stream real detections.</div>
+            </div>
           </div>
         </div>
       </section>

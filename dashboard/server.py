@@ -134,6 +134,7 @@ class RuntimeController:
         self.last_summary: Dict[str, Any] = {}
         self.last_demo_result: Optional[Dict[str, Any]] = None
         self.last_backend_test_result: Optional[Dict[str, Any]] = None
+        self.last_judge_demo_result: Optional[Dict[str, Any]] = None
         self.lock = threading.Lock()
 
     def _publish(self, event: Dict[str, Any]) -> None:
@@ -166,7 +167,12 @@ class RuntimeController:
             self.last_summary = {}
             self.stop_event = threading.Event()
             
-            if source == "BACKEND_TEST":
+            if source == "JUDGE_DEMO":
+                self.source = "JUDGE_DEMO"
+                self.session_id = f"JUDGE-{uuid.uuid4().hex[:8].upper()}"
+                self.active_pcap = resolved_pcap
+                self.active_interface = None
+            elif source == "BACKEND_TEST":
                 self.source = "BACKEND_TEST"
                 self.session_id = f"TEST-{uuid.uuid4().hex[:8].upper()}"
                 self.active_pcap = resolved_pcap
@@ -227,6 +233,14 @@ class RuntimeController:
                             "error": self.last_error,
                             "completed_at": datetime.now(timezone.utc).isoformat(),
                         }
+                    elif self.source == "JUDGE_DEMO":
+                        self.last_judge_demo_result = {
+                            "session_id": self.session_id,
+                            "pcap": self.active_pcap,
+                            "summary": dict(self.last_summary or {}),
+                            "error": self.last_error,
+                            "completed_at": datetime.now(timezone.utc).isoformat(),
+                        }
                 if self.source == "DEMO" and self.last_demo_result:
                     self._publish({
                         "type": "DEMO_COMPLETED",
@@ -236,6 +250,11 @@ class RuntimeController:
                     self._publish({
                         "type": "BACKEND_TEST_COMPLETED",
                         "data": dict(self.last_backend_test_result),
+                    })
+                elif self.source == "JUDGE_DEMO" and self.last_judge_demo_result:
+                    self._publish({
+                        "type": "JUDGE_DEMO_COMPLETED",
+                        "data": dict(self.last_judge_demo_result),
                     })
 
         self.thread = threading.Thread(target=worker, daemon=True, name="diode-sentinel-runtime")
@@ -258,10 +277,14 @@ class RuntimeController:
         with self.lock:
             summary = self.last_summary
             if not summary:
-                if self.source == "BACKEND_TEST" and self.last_backend_test_result:
+                if self.source == "JUDGE_DEMO" and self.last_judge_demo_result:
+                    summary = self.last_judge_demo_result.get("summary", {})
+                elif self.source == "BACKEND_TEST" and self.last_backend_test_result:
                     summary = self.last_backend_test_result.get("summary", {})
                 elif self.source == "DEMO" and self.last_demo_result:
                     summary = self.last_demo_result.get("summary", {})
+                elif self.last_judge_demo_result:
+                    summary = self.last_judge_demo_result.get("summary", {})
                 elif self.last_backend_test_result:
                     summary = self.last_backend_test_result.get("summary", {})
                 elif self.last_demo_result:
@@ -269,10 +292,14 @@ class RuntimeController:
 
             active_pcap = self.active_pcap
             if not active_pcap:
-                if self.source == "BACKEND_TEST" and self.last_backend_test_result:
+                if self.source == "JUDGE_DEMO" and self.last_judge_demo_result:
+                    active_pcap = self.last_judge_demo_result.get("pcap")
+                elif self.source == "BACKEND_TEST" and self.last_backend_test_result:
                     active_pcap = self.last_backend_test_result.get("pcap")
                 elif self.source == "DEMO" and self.last_demo_result:
                     active_pcap = self.last_demo_result.get("pcap")
+                elif self.last_judge_demo_result:
+                    active_pcap = self.last_judge_demo_result.get("pcap")
                 elif self.last_backend_test_result:
                     active_pcap = self.last_backend_test_result.get("pcap")
                 elif self.last_demo_result:
@@ -280,10 +307,14 @@ class RuntimeController:
 
             session_id = self.session_id
             if not session_id:
-                if self.source == "BACKEND_TEST" and self.last_backend_test_result:
+                if self.source == "JUDGE_DEMO" and self.last_judge_demo_result:
+                    session_id = self.last_judge_demo_result.get("session_id")
+                elif self.source == "BACKEND_TEST" and self.last_backend_test_result:
                     session_id = self.last_backend_test_result.get("session_id")
                 elif self.source == "DEMO" and self.last_demo_result:
                     session_id = self.last_demo_result.get("session_id")
+                elif self.last_judge_demo_result:
+                    session_id = self.last_judge_demo_result.get("session_id")
                 elif self.last_backend_test_result:
                     session_id = self.last_backend_test_result.get("session_id")
                 elif self.last_demo_result:
@@ -291,9 +322,10 @@ class RuntimeController:
 
             mode = (
                 "live" if self.source == "LIVE"
+                else ("judge_demo" if self.source == "JUDGE_DEMO"
                 else ("backend_test" if self.source == "BACKEND_TEST"
                 else ("demo" if self.source == "DEMO"
-                else "idle"))
+                else "idle")))
             )
 
             return {
@@ -309,6 +341,7 @@ class RuntimeController:
                 "summary": summary,
                 "last_demo_result": self.last_demo_result,
                 "last_backend_test_result": self.last_backend_test_result,
+                "last_judge_demo_result": self.last_judge_demo_result,
             }
 
     def snapshot(self, event_type: Optional[str] = None) -> List[Dict[str, Any]]:
@@ -381,7 +414,7 @@ async def start_runtime(req: RuntimeStartRequest):
     try:
         src = req.source
         if not src and req.mode:
-            src = "BACKEND_TEST" if req.mode.lower() == "backend_test" else ("DEMO" if req.mode.lower() == "demo" else "LIVE")
+            src = "JUDGE_DEMO" if req.mode.lower() == "judge_demo" else ("BACKEND_TEST" if req.mode.lower() == "backend_test" else ("DEMO" if req.mode.lower() == "demo" else "LIVE"))
         return runtime_controller.start(pcap=req.pcap, interface=req.interface, source=src)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
@@ -437,6 +470,149 @@ async def get_last_backend_test_result():
     if res is None:
         return {"status": "none", "last_backend_test_result": None}
     return {"status": "available", "last_backend_test_result": res}
+
+
+class JudgeDemoStartRequest(BaseModel):
+    pcap: Optional[str] = "data_generation/pcaps/attack_portscan.pcap"
+
+
+@app.post("/api/judge-demo/start")
+async def start_judge_demo(req: JudgeDemoStartRequest):
+    """
+    Executes a real attack PCAP through the real pipeline in dedicated JUDGE_DEMO mode,
+    streaming real ThreatCore alerts with full watchdog compliance and complete isolation.
+    """
+    try:
+        st = runtime_controller.start(pcap=req.pcap, source="JUDGE_DEMO")
+        return {
+            "mode": "judge_demo",
+            "source": "JUDGE_DEMO",
+            "session_id": st.get("session_id"),
+            "pcap": st.get("pcap") or req.pcap,
+            "running": st.get("running", True),
+        }
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+
+@app.get("/api/judge-demo/status")
+async def get_judge_demo_status():
+    """
+    Returns active or completed status of the Judge Demo execution.
+    """
+    st = runtime_controller.status()
+    summary = st.get("summary") or {}
+    if not summary and st.get("last_judge_demo_result"):
+        summary = st["last_judge_demo_result"].get("summary", {})
+    return {
+        "mode": st.get("mode"),
+        "source": st.get("source"),
+        "session_id": st.get("session_id"),
+        "pcap": st.get("pcap"),
+        "running": st.get("running"),
+        "events_buffered": st.get("events_buffered"),
+        "last_error": st.get("last_error"),
+        "summary": summary,
+        "last_judge_demo_result": st.get("last_judge_demo_result"),
+    }
+
+
+@app.get("/api/judge-demo/last_result")
+async def get_last_judge_demo_result():
+    """
+    Returns the most recent completed Judge Demo execution result.
+    """
+    res = runtime_controller.last_judge_demo_result
+    if res is None:
+        return {"status": "none", "last_judge_demo_result": None}
+    return {"status": "available", "last_judge_demo_result": res}
+
+
+@app.post("/api/judge-demo/stop")
+async def stop_judge_demo():
+    """Stops the active judge demo run safely."""
+    return runtime_controller.stop()
+
+
+@app.get("/api/judge-demo/scenarios")
+async def get_judge_demo_scenarios():
+    """
+    Returns the 6 real attack PCAP scenarios available for the SIH/NTRO Judge Demo.
+    """
+    return [
+        {
+            "id": "port_scan",
+            "name": "1. Port Scan / Reconnaissance",
+            "threat_class": "Port_Scanning",
+            "pcap": "data_generation/pcaps/attack_portscan.pcap",
+            "pcap_file": "attack_portscan.pcap",
+            "description": "TCP SYN stealth horizontal & vertical port sweep targeting internal gateway services.",
+            "packets": 196,
+            "severity": "HIGH",
+            "icon": "scan",
+            "is_primary": True
+        },
+        {
+            "id": "c2_beacon",
+            "name": "2. C2 Beaconing Channel",
+            "threat_class": "C2_Beaconing",
+            "pcap": "data_generation/pcaps/attack_c2_beacon.pcap",
+            "pcap_file": "attack_c2_beacon.pcap",
+            "description": "Strict periodic heartbeat beacons to external untrusted ASN with low jitter.",
+            "packets": 43,
+            "severity": "CRITICAL",
+            "icon": "radio",
+            "is_primary": False
+        },
+        {
+            "id": "dga_tunnel",
+            "name": "3. DGA / DNS Tunnelling",
+            "threat_class": "DGA_Tunnelling",
+            "pcap": "data_generation/pcaps/attack_dga.pcap",
+            "pcap_file": "attack_dga.pcap",
+            "description": "High-entropy algorithmic domain queries and covert DNS TXT channel.",
+            "packets": 50,
+            "severity": "HIGH",
+            "icon": "globe",
+            "is_primary": False
+        },
+        {
+            "id": "ddos_syn",
+            "name": "4. DDoS SYN Flood",
+            "threat_class": "DDoS",
+            "pcap": "data_generation/pcaps/attack_ddos_syn.pcap",
+            "pcap_file": "attack_ddos_syn.pcap",
+            "description": "Volumetric SYN flood with spoofed source IPs across disparate subnets.",
+            "packets": 1000,
+            "severity": "CRITICAL",
+            "icon": "zap",
+            "is_primary": False
+        },
+        {
+            "id": "encrypted_malware",
+            "name": "5. Encrypted Malware Dynamics",
+            "threat_class": "Encrypted_Malware",
+            "pcap": "data_generation/pcaps/attack_encrypted_malware.pcap",
+            "pcap_file": "attack_encrypted_malware.pcap",
+            "description": "Suspicious TLS client hello JA3/JA4 fingerprinting & packet size dynamics.",
+            "packets": 120,
+            "severity": "HIGH",
+            "icon": "lock",
+            "is_primary": False
+        },
+        {
+            "id": "data_exfil",
+            "name": "6. Data Exfiltration Burst",
+            "threat_class": "Data_Exfiltration",
+            "pcap": "data_generation/pcaps/attack_exfil.pcap",
+            "pcap_file": "attack_exfil.pcap",
+            "description": "Extreme outbound/inbound volume asymmetry and high entropy payload burst.",
+            "packets": 250,
+            "severity": "CRITICAL",
+            "icon": "database",
+            "is_primary": False
+        }
+    ]
 
 
 @app.post("/api/runtime/stop")
@@ -622,6 +798,7 @@ def _benchmark_artifact() -> Dict[str, Any]:
         "source": BENCHMARK_REPORT_PATH,
     }
 
+@app.get("/api/compliance")
 @app.get("/api/compliance/audit")
 async def get_compliance_audit():
     """

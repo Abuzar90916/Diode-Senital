@@ -23,7 +23,7 @@
   ],
   "rewrites": [
     {
-      "source": "/dashboard/(overview|threats|incidents|flows|engine|demo|system)(/.*)?",
+      "source": "/dashboard/(overview|threats|incidents|flows|engine|demo|system|judge)(/.*)?",
       "destination": "/index.html"
     },
     {
